@@ -1,7 +1,15 @@
 import {SHAPES,cells,spawn,motion} from '/engine.js';
 const $=id=>document.getElementById(id),colors={I:'#72cfdb',J:'#7498ec',L:'#e6b570',O:'#ded479',S:'#85c39a',T:'#b699d5',Z:'#dd8e91',G:'#6c8580'};
 const labels={search:'探索 bot',llm:'LLM · 試し読みなし','llm-preview':'LLM · 試し読みあり'};
-let current=null,liveId=null,frame=0,follow=true,animation=0,noticeTimer;
+let current=null,liveId=null,frame=0,follow=true,animation=0,noticeTimer,savedRuns=[];
+function modelLabel(config) {return config.type==='search'?'モデル不使用（固定評価）':config.model??'モデル名の記録なし';}
+function savedIdentity() {
+  const run=savedRuns.find(r=>r.id===$('saved-runs').value),container=$('saved-models');
+  container.replaceChildren();container.hidden=!run;
+  for(const [i,p] of (run?.players??[]).entries()) {
+    const line=document.createElement('p');line.textContent=`${i===0?'A':'B'} · ${labels[p.type]} — ${modelLabel(p)}`;container.append(line);
+  }
+}
 const empty=()=>Array.from({length:24},()=>Array(10).fill('.'));
 function notice(message) { $('notice').textContent=message;$('notice').style.display='block';clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>$('notice').style.display='none',9000); }
 async function api(path,data) {const r=await fetch(path,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const v=await r.json();if(!r.ok) throw Error(v.error??`HTTP ${r.status}`);return v;}
@@ -31,6 +39,8 @@ function render() {
     const active=state?.status==='playing'&&state.active===i;$(`panel-${key}`).classList.toggle('active',active);
     $(`turn-${key}`).textContent=active?`残り ${state.remaining} 固定`:'待機';
     $(`name-${key}`).textContent=labels[current?.header.config.players[i].type??$(`type-${key}`).value];
+    const config=current?.header.config.players[i];
+    $(`recorded-model-${key}`).textContent=config?modelLabel(config):'対局作成後に使用モデルを表示';
   }
   $('lock-label').textContent=`${state?.locks??0} / ${state?.rules.maxLocks??280} LOCKS`;
   $('timeline').max=records.length;$('timeline').value=frame;$('frame').textContent=`${frame} / ${records.length}`;
@@ -69,7 +79,8 @@ $('path').onclick=catchErrors(async()=>{
   for(const op of record.move.path){if(token!==animation)return;pos=motion(board,record.move.piece,pos,op);drawBoard(`board-${key}`,board,{piece:record.move.piece,cells:cells(record.move.piece,pos)});await new Promise(r=>setTimeout(r,100));}
   if(token===animation)render();
 });
-async function refresh(){const list=await api('/api/runs'),selected=$('saved-runs').value;$('saved-runs').replaceChildren(new Option('リプレイを選択',''));for(const r of list)$('saved-runs').append(new Option(`${r.createdAt.slice(5,16).replace('T',' ')} · ${r.locks}手 · ${r.status}`,r.id));$('saved-runs').value=selected;}
+async function refresh(){savedRuns=await api('/api/runs');const selected=$('saved-runs').value;$('saved-runs').replaceChildren(new Option('リプレイを選択',''));for(const r of savedRuns){const matchup=r.players.map(p=>p.type==='search'?labels[p.type]:`${p.model??'モデル不明'} (${labels[p.type]})`).join(' vs ');$('saved-runs').append(new Option(`${r.createdAt.slice(5,16).replace('T',' ')} · ${matchup} · ${r.locks}手 · ${r.status}`,r.id));}$('saved-runs').value=selected;savedIdentity();}
+$('saved-runs').onchange=savedIdentity;
 $('refresh').onclick=catchErrors(refresh);
 $('open-run').onclick=catchErrors(async()=>{
   if(current?.busy||current?.running)throw Error('現在の判断を停止してからリプレイを開いてください');
