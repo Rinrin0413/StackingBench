@@ -1,0 +1,19 @@
+import {writeFile,mkdir} from 'node:fs/promises';
+import {readRun,RUNS,hashState} from '../src/match.js';
+import {decide,playerConfig,DEFAULT_MODEL} from '../src/players.js';
+import {applyMove,createGame} from '../src/engine.js';
+const args=process.argv.slice(2),option=(name,fallback)=>{const i=args.indexOf(`--${name}`);return i<0?fallback:args[i+1];};
+const run=option('run',null),index=Number(option('index','0'));
+let state=createGame({seeds:[101,202]});
+if(run) {const records=await readRun(run);state=index===0?records[0].initialState:records.filter(r=>r.type==='decision')[index-1]?.state;}
+if(!state||state.status!=='playing')throw Error('Select an active replay position');
+const report={kind:'single-position-comparison',at:new Date().toISOString(),parent:run?{id:run,index}:null,
+  initialState:state,initialHash:hashState(state),memo:'',results:[],note:'One decision per condition; not a match or strength estimate.'};
+await mkdir(RUNS,{recursive:true});
+for(const type of ['llm','llm-preview','search']) {
+  const config=playerConfig({type,model:option('model',DEFAULT_MODEL),thinking:option('thinking','server-default'),transitions:Number(option('transitions','32'))});
+  console.log(`Comparing ${type} from ${report.initialHash}`);
+  try {const decision=await decide(state,config,{baseUrl:process.env.LLM_BASE_URL??'http://localhost:8082'});report.results.push({config,...decision,afterState:applyMove(state,decision.move).state});}
+  catch(e) {report.results.push({config,error:{code:e.code,message:e.message,outcome:e.outcome,detail:e.detail}});}
+  const path=`${RUNS}/position-${report.at.replace(/[:.]/g,'-')}.json`;await writeFile(path,JSON.stringify(report,null,2));console.log(path);
+}

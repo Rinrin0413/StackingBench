@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>StackingBench — 対戦ラボ</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+  <header><a class="brand" href="/"><span class="brand-icon">▦</span> Stacking<span>Bench</span><small>LOCAL LAB</small></a><div class="connection"><i id="connection-dot"></i><span id="connection">ローカル環境</span><button id="probe" class="text-button">LLM 接続確認 ↗</button></div></header>
+  <main>
+    <section class="intro"><div><p class="eyebrow">OBSERVE · COMPARE · REPLAY</p><h1>一手ずつ、判断を観察する。</h1><p class="subtitle">SRS 対戦ベンチマーク。盤面理解、先読み、攻防の選択を同じルールで比較。</p></div><span class="version">EXPERIMENTAL <b>v0.1</b></span></section>
+    <div class="workspace">
+      <aside>
+        <div class="section-title"><h2>対局を設定</h2><span>01 — SETUP</span></div>
+        <form id="setup">
+          <fieldset><legend><i class="dot blue"></i> PLAYER A</legend><label>プレイヤー<select id="type-a"><option value="search">探索 bot</option><option value="llm">LLM · 試し読みなし</option><option value="llm-preview">LLM · 試し読みあり</option></select></label><label class="model-label">モデル<select id="model-a"></select></label></fieldset>
+          <fieldset><legend><i class="dot green"></i> PLAYER B</legend><label>プレイヤー<select id="type-b"><option value="search">探索 bot</option><option value="llm">LLM · 試し読みなし</option><option value="llm-preview">LLM · 試し読みあり</option></select></label><label class="model-label">モデル<select id="model-b"></select></label></fieldset>
+          <div class="two-fields"><label>系列 A<input id="seed-a" type="number" min="1" max="4294967295" value="101" required></label><label>系列 B<input id="seed-b" type="number" min="1" max="4294967295" value="202" required></label></div>
+          <div class="two-fields"><label>先手<select id="first"><option value="0">Player A</option><option value="1">Player B</option></select></label><label>最大固定数<input id="max-locks" type="number" value="280" min="1" max="100000" required></label></div>
+          <details class="settings"><summary>観測・生成・探索の設定</summary><label>観測形式<select id="observation"><option value="text">文字 · JSON</option><option disabled>画像（今後対応）</option><option disabled>文字＋画像（今後対応）</option></select></label><div class="two-fields"><label>遷移 / 判断<input id="transitions" type="number" min="1" max="2048" value="32"></label><label>出力 / 応答<input id="tokens" type="number" min="32" max="32768" value="2048"></label></div><div class="two-fields"><label>待機上限 (秒)<input id="timeout" type="number" min="1" max="600" value="120"></label><label>Temperature<input id="temperature" type="number" min="0" max="2" step="0.1" value="0.2"></label></div><label>思考設定<select id="thinking"><option value="server-default">サーバー既定</option><option value="off">enable_thinking=false</option></select></label><label>生成予算 / 判断<input id="decision-tokens" type="number" min="32" max="131072" value="8192"></label><label>最大 API 往復 / 判断<input id="max-calls" type="number" min="1" max="100" value="34"></label></details>
+          <button class="primary wide" id="create" type="submit">新しい対局を作成 <span>→</span></button>
+        </form>
+        <div class="saved"><div class="section-title"><h2>保存した対局</h2><button id="refresh" class="text-button" aria-label="保存対局を更新">↻</button></div><select id="saved-runs"><option value="">リプレイを選択</option></select><button id="open-run" class="secondary wide">リプレイを開く</button></div>
+        <p class="aside-note">7固定で交代 / HOLD / NEXT 5<br>結果はローカルに自動保存されます。</p>
+      </aside>
+      <section class="arena">
+        <div class="arena-toolbar"><div><span class="live-badge" id="badge">READY</span><span id="match-label">対局を作成して開始</span></div><span id="lock-label">0 / 280 LOCKS</span></div>
+        <div class="boards">
+          <article class="player-panel" id="panel-a"><div class="player-heading"><div><span class="player-label blue-text">PLAYER A</span><h2 id="name-a">探索 bot</h2></div><span class="turn-indicator" id="turn-a">待機</span></div><div class="board-area"><div class="board-wrap"><canvas id="board-a" width="300" height="720" aria-label="Player A 盤面"></canvas><span class="board-caption">10 × 20 + 4 BUFFER</span></div><div class="piece-rail"><label>HOLD</label><div id="hold-a" class="mini-piece"></div><label>CURRENT</label><div id="current-a" class="mini-piece"></div><label>NEXT</label><div id="next-a" class="next-pieces"></div></div></div><div class="player-stats"><div><span>ATTACK</span><b id="attack-a">0</b></div><div><span>PENDING</span><b id="pending-a">0</b></div><div><span>B2B / REN</span><b id="chain-a">— / —</b></div></div></article>
+          <article class="player-panel" id="panel-b"><div class="player-heading"><div><span class="player-label green-text">PLAYER B</span><h2 id="name-b">探索 bot</h2></div><span class="turn-indicator" id="turn-b">待機</span></div><div class="board-area"><div class="board-wrap"><canvas id="board-b" width="300" height="720" aria-label="Player B 盤面"></canvas><span class="board-caption">10 × 20 + 4 BUFFER</span></div><div class="piece-rail"><label>HOLD</label><div id="hold-b" class="mini-piece"></div><label>CURRENT</label><div id="current-b" class="mini-piece"></div><label>NEXT</label><div id="next-b" class="next-pieces"></div></div></div><div class="player-stats"><div><span>ATTACK</span><b id="attack-b">0</b></div><div><span>PENDING</span><b id="pending-b">0</b></div><div><span>B2B / REN</span><b id="chain-b">— / —</b></div></div></article>
+        </div>
+        <div class="play-controls"><button id="step" class="secondary" disabled>1手進める</button><button id="run" class="primary" disabled>▶ 自動対戦</button><button id="stop" class="text-button" disabled>停止</button><span id="progress">準備完了</span></div>
+        <div class="replay-bar"><button id="prev" class="icon-button" aria-label="前の手">‹</button><input id="timeline" type="range" min="0" max="0" value="0" aria-label="リプレイ位置"><button id="next" class="icon-button" aria-label="次の手">›</button><span id="frame">0 / 0</span><button id="path" class="text-button" disabled>操作を再生</button><button id="fork" class="text-button" disabled>この局面で比較 ↗</button></div>
+        <section class="inspector"><div class="section-title"><h2>判断の記録</h2><span id="decision-label">WAITING FOR FIRST MOVE</span></div><p id="reason">選択理由、作戦メモ、実際の結果をここに表示します。</p><p id="memo"></p><div id="decision-metrics" class="decision-metrics"></div><details><summary>盤面・選択手・結果の JSON</summary><pre id="json-view">{}</pre></details><p class="disclaimer">選択理由はモデルの自己申告です。小規模な試行だけで強さを結論づけないでください。</p></section>
+      </section>
+    </div>
+    <div id="notice" role="status" aria-live="polite"></div>
+    <footer><span>StackingBench / Local research workspace</span><span>Deterministic engine · Reproducible seeds · Recorded decisions</span></footer>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body></html>
