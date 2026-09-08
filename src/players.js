@@ -1,4 +1,5 @@
 import {performance} from 'node:perf_hooks';
+import {setTimeout as delay} from 'node:timers/promises';
 import {legalMoves,pendingCount} from './engine.js';
 import {observe,PreviewSession} from './observation.js';
 import {providerFor,endpointFor,authHeaders,redactSecret,estimatedCost,thinkingParameters} from './providers.js';
@@ -6,7 +7,7 @@ import {providerFor,endpointFor,authHeaders,redactSecret,estimatedCost,thinkingP
 export const DEFAULT_MODEL='Qwen3.6-35B-A3B_UD-Q4_K_XL_128K-ctx_fast';
 export const QUICK_MODEL='Gemma-4-E2B_UD_Q4_K_XL_fast';
 export const DEFAULT_PLAYER={type:'search',observation:'text',model:DEFAULT_MODEL,transitions:32,temperature:0.2,maxTokens:2048,
-  timeoutMs:120000,decisionTokens:8192,maxCalls:34,responseFormat:'schema',responseParsing:'strict',thinking:'server-default'};
+  timeoutMs:120000,decisionTokens:8192,maxCalls:34,requestIntervalMs:0,responseFormat:'schema',responseParsing:'strict',thinking:'server-default'};
 export function playerConfig(value={}) {
   const provider=value.provider??providerFor(value.model??DEFAULT_MODEL);
   const p={...DEFAULT_PLAYER,...(provider==='sakura'?{responseFormat:'plain',responseParsing:'json-fence-v1'}:{}),...value,provider};
@@ -16,7 +17,7 @@ export function playerConfig(value={}) {
   if(!['search','llm','llm-preview'].includes(p.type)) throw Error('Unknown player type');
   if(!['text','image','both'].includes(p.observation)) throw Error('Unknown observation encoding');
   if(p.type!=='search'&&p.observation!=='text') throw Error('Only text observations are implemented; image/both are reserved');
-  for(const [key,min,max] of [['transitions',1,2048],['maxTokens',32,32768],['timeoutMs',100,600000],['decisionTokens',32,131072],['maxCalls',1,100]])
+  for(const [key,min,max] of [['transitions',1,2048],['maxTokens',32,32768],['timeoutMs',100,600000],['decisionTokens',32,131072],['maxCalls',1,100],['requestIntervalMs',0,60000]])
     if(!Number.isInteger(p[key])||p[key]<min||p[key]>max) throw Error(`Invalid ${key}`);
   if(typeof p.model!=='string'||!p.model.length||p.model.length>300) throw Error('Invalid model');
   if(!Number.isFinite(p.temperature)||p.temperature<0||p.temperature>2) throw Error('Invalid temperature');
@@ -89,12 +90,20 @@ export async function completion(baseUrl,body,timeoutMs) {
   if(!response.ok) throw new DecisionError('http',`HTTP ${response.status}`, 'invalid',{status:response.status,body:raw});
   try { return JSON.parse(raw); } catch { throw new DecisionError('api-json','Server returned invalid JSON','invalid',{body:raw}); }
 }
+const nextRequestAt=new Map();
+async function paceRequest(endpoint,interval) {
+  if(!interval)return 0;
+  const now=performance.now(),wait=Math.max(0,(nextRequestAt.get(endpoint)??now)-now);
+  nextRequestAt.set(endpoint,now+wait+interval);
+  if(wait)await delay(wait);
+  return wait;
+}
 export async function llmDecision(game,config,{baseUrl='http://localhost:8082',memo='',transport=completion}={}) {
   baseUrl=endpointFor(config,baseUrl);
   const start=performance.now(),moves=legalMoves(game),session=config.type==='llm-preview'?new PreviewSession(game,config.transitions):null;
   const messages=[{role:'system',content:systemPrompt(config,game.rules)},{role:'user',content:JSON.stringify(observe(game,moves,memo))}];
   const trace={requests:[],previews:[]};
-  const metrics={elapsedMs:0,transitions:0,calls:0,promptTokens:0,completionTokens:0,usageMissing:0,invalidResponses:0,cost:null};
+  const metrics={elapsedMs:0,pacingMs:0,transitions:0,calls:0,promptTokens:0,completionTokens:0,usageMissing:0,invalidResponses:0,cost:null};
   let spent=0,errors=0;
   const finish=()=>{metrics.elapsedMs=performance.now()-start;metrics.transitions=session?.used??0;metrics.estimatedCostJpy=config.provider==='sakura'?estimatedCost(config.model,metrics.promptTokens,metrics.completionTokens):null;trace.previews=session?.history??[];};
   try {
@@ -104,7 +113,9 @@ export async function llmDecision(game,config,{baseUrl='http://localhost:8082',m
       const body={model:config.model,messages:structuredClone(messages),temperature:config.temperature,max_tokens:Math.min(config.maxTokens,available),stream:false};
       if(config.responseFormat!=='plain') body.response_format=config.responseFormat==='json'?{type:'json_object'}:{type:'json_object',schema:ACTION_SCHEMA};
       Object.assign(body,thinkingParameters(config));
-      const record={request:body,provider:config.provider??'llamacpp',endpoint:baseUrl,startedAt:new Date().toISOString()}; trace.requests.push(record);metrics.calls++;
+      const pacingMs=await paceRequest(baseUrl,config.requestIntervalMs);
+      metrics.pacingMs+=pacingMs;
+      const record={request:body,provider:config.provider??'llamacpp',endpoint:baseUrl,pacingMs,startedAt:new Date().toISOString()}; trace.requests.push(record);metrics.calls++;
       const callStart=performance.now(); let data;
       try { data=await transport(baseUrl,body,config.timeoutMs);record.response=data; }
       catch(e) {record.error={code:e.code??'connection',message:e.message,detail:e.detail};metrics.usageMissing++;metrics.promptTokens=null;metrics.completionTokens=null;throw e;}

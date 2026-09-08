@@ -18,17 +18,19 @@ npm run probe -- preview/Kimi-K2.6
 npm run probe -- preview/gemma-4-31B-it
 
 # 同じ保存局面を3条件で各1判断
-npm run compare -- --model preview/Kimi-K2.6 --run RUN_ID --index 14 --max-tokens 4096 --decision-tokens 16384 --max-calls 10
+npm run compare -- --model preview/Kimi-K2.6 --run RUN_ID --index 14 --max-tokens 4096 --decision-tokens 16384 --max-calls 10 --thinking off --request-interval-ms 10000
 npm run compare -- --model preview/gemma-4-31B-it --run RUN_ID --index 14 --max-tokens 4096 --decision-tokens 16384 --max-calls 10
 
 # 最大56固定の対戦。短すぎる14固定で攻防を判断しない
-npm run bench -- --model preview/Kimi-K2.6 --a llm-preview --b search --max-locks 56 --seeds 101 --max-tokens 4096 --decision-tokens 16384 --max-calls 10
+npm run bench -- --model preview/Kimi-K2.6 --a llm-preview --b search --max-locks 56 --seeds 101 --max-tokens 4096 --decision-tokens 16384 --max-calls 10 --thinking off --request-interval-ms 10000
 npm run bench -- --model preview/gemma-4-31B-it --a llm-preview --b search --max-locks 56 --seeds 101 --max-tokens 4096 --decision-tokens 16384 --max-calls 10
 ```
 
 UIのモデル選択にも両IDを追加。リプレイにモデルIDとproviderを表示します。「LLM 接続確認」は選択モデルへの短い生成要求を1回送信します。Aが探索botでBがLLMならB、それ以外はAの選択モデルを使います。以前のモデル一覧取得だけの確認から変更しました。
 
 `--model-a` / `--model-b` で両者別モデルも設定できます。条件比較では同一局面、同じ公開情報、同じ予算を使い、本文・reasoning_content・usage・実際のpreview回数を保存します。HTTP401/429/500やtimeoutは無効で、接続先やプレイヤーの無断置換はありません。
+
+`--request-interval-ms 10000` で同一プロセス・接続先への要求開始間隔を10秒以上にできます。previewと訂正要求にも適用し、別プロセスとは共有しません。HTTP429の自動再試行はしません。既定値は0、使用値は対局設定に保存します。待機時間は `pacingMs` に記録し、`elapsedMs` はこれを含むため、API自体の応答時間は各requestの `elapsedMs` を参照します。10秒は今回の試験値で、公式のレート上限を示すものではありません。
 
 ## 確認したAPI仕様と残る検証
 

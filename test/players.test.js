@@ -53,3 +53,13 @@ test('unsupported encodings and invalid numerical budgets are rejected',()=>{
   assert.doesNotThrow(()=>playerConfig({type:'search',observation:'image'}));
   assert.throws(()=>playerConfig({temperature:NaN}),/temperature/);
 });
+test('request pacing applies to correction calls and is recorded separately',async()=>{
+  const g=createGame(),id=legalMoves(g)[0].id;let calls=0;
+  const d=await llmDecision(g,playerConfig({type:'llm',requestIntervalMs:100}),{baseUrl:'http://localhost:9999',transport:async()=>{
+    calls++;return reply({action:'choose',move:calls===1?'invalid-id':id});
+  }});
+  assert.equal(calls,2);assert.equal(d.trace.requests[0].pacingMs,0);
+  assert(d.trace.requests[1].pacingMs>0);assert(d.metrics.pacingMs>0);
+  assert.equal(d.metrics.pacingMs,d.trace.requests[1].pacingMs);
+  assert.throws(()=>playerConfig({requestIntervalMs:-1}),/requestIntervalMs/);
+});

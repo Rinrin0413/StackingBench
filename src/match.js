@@ -37,7 +37,7 @@ export function summarize(state,records) {
     const missing=decisions.some(r=>r.metrics?.completionTokens===null);
     return {...p.stats,attackPerLock:p.stats.locks?p.stats.attack/p.stats.locks:null,
       digEfficiency:p.stats.received?p.stats.garbageRowsCleared/p.stats.received:null,
-      elapsedMs:sum('elapsedMs'),meanDecisionMs:decisions.length?sum('elapsedMs')/decisions.length:null,
+      elapsedMs:sum('elapsedMs'),pacingMs:sum('pacingMs'),meanDecisionMs:decisions.length?sum('elapsedMs')/decisions.length:null,
       transitions:sum('transitions'),calls:sum('calls'),promptTokens:missing?null:sum('promptTokens'),completionTokens:missing?null:sum('completionTokens'),
       usageMissing:sum('usageMissing'),invalidResponses:sum('invalidResponses'),cost:null,
       estimatedCostJpy:decisions.length&&decisions.every(r=>Number.isFinite(r.metrics?.estimatedCostJpy))?sum('estimatedCostJpy'):null,
