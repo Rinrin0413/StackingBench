@@ -4,6 +4,7 @@ import {randomUUID,createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {createGame,clone,legalMoves,applyMove} from './engine.js';
 import {playerConfig,decide,DecisionError} from './players.js';
+import {endpointFor,pricingFor} from './providers.js';
 
 export const RUNS=resolve(process.env.STACKINGBENCH_RUNS??'runs');
 export const hashState=state=>createHash('sha256').update(JSON.stringify(state)).digest('hex');
@@ -38,7 +39,9 @@ export function summarize(state,records) {
       digEfficiency:p.stats.received?p.stats.garbageRowsCleared/p.stats.received:null,
       elapsedMs:sum('elapsedMs'),meanDecisionMs:decisions.length?sum('elapsedMs')/decisions.length:null,
       transitions:sum('transitions'),calls:sum('calls'),promptTokens:missing?null:sum('promptTokens'),completionTokens:missing?null:sum('completionTokens'),
-      usageMissing:sum('usageMissing'),invalidResponses:sum('invalidResponses'),cost:null,errors:decisions.filter(r=>r.error).map(r=>r.error.code)};
+      usageMissing:sum('usageMissing'),invalidResponses:sum('invalidResponses'),cost:null,
+      estimatedCostJpy:decisions.length&&decisions.every(r=>Number.isFinite(r.metrics?.estimatedCostJpy))?sum('estimatedCostJpy'):null,
+      errors:decisions.filter(r=>r.error).map(r=>r.error.code)};
   });
 }
 export class Match {
@@ -47,13 +50,13 @@ export class Match {
     if(players.length!==2) throw Error('Two player configurations required');
     const initial=options.initialState?clone(options.initialState):createGame(options);
     if(initial.rules.version!==1||initial.status!=='playing') throw Error('Only active v1 positions can be resumed');
-    const config={players,baseUrl:process.env.LLM_BASE_URL??'http://localhost:8082',parent:options.parent??null};
+    const config={players,baseUrl:endpointFor({provider:'llamacpp'}),connections:players.map(p=>p.type==='search'?null:{provider:p.provider,baseUrl:endpointFor(p),pricing:p.provider==='sakura'?pricingFor(p.model):null}),parent:options.parent??null};
     const m=new Match();
     m.id=`${new Date().toISOString().replace(/[:.]/g,'-')}_${randomUUID().slice(0,8)}`;
     m.state=initial;m.config=config;m.records=[];m.memos=['',''];m.running=false;m.busy=false;m.stopRequested=false;m.ended=false;
     let sourceRevision=null,sourceDirty=null;
     try {sourceRevision=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();sourceDirty=!!execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim();} catch { /* Initial uncommitted workspace. */ }
-    const sourceFiles=['engine.js','observation.js','players.js','match.js'];
+    const sourceFiles=['engine.js','observation.js','players.js','match.js','providers.js'];
     const sourceHash=createHash('sha256');for(const file of sourceFiles)sourceHash.update(await readFile(new URL(file,import.meta.url)));
     m.header={type:'header',format:1,id:m.id,createdAt:new Date().toISOString(),config,initialState:clone(initial),initialHash:hashState(initial),
       runtime:process.version,engineVersion:'0.1.0',sourceRevision,sourceDirty,sourceHash:sourceHash.digest('hex')};

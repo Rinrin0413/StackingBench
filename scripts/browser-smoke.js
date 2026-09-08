@@ -8,7 +8,7 @@ try {
   const page=await browser.newPage({viewport:{width:1440,height:1150}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   await page.goto(process.env.APP_URL??'http://127.0.0.1:3210');
-  await page.waitForFunction(()=>document.querySelector('#model-a').options.length===3);
+  await page.waitForFunction(()=>document.querySelector('#model-a').options.length>=3);
   await page.fill('#max-locks','28');await page.click('#create');await page.waitForFunction(()=>!document.querySelector('#step').disabled);
   await page.click('#step');await page.waitForFunction(()=>document.querySelector('#frame').textContent==='1 / 1');
   await page.click('#run');await page.waitForFunction(()=>document.querySelector('#badge').textContent==='FINISHED',{},{timeout:60000});

@@ -50,6 +50,8 @@ LLM は JSON で `choose` または `preview` を要求するアプリケーシ�
 
 出力不正の詳細codeは `invalid-json` / `illegal-move` / `invalid-tool` / `output-truncated` / その他形式違反 `invalid-response`。初回修正で成功した場合も `invalidResponses` と要求ごとのvalidationCodeを記録。開発中の初回ログでは詳細code導入前の `invalid-response` 表記があり、finish_reasonとvalidationErrorで識別できる。
 
+接続条件の `responseParsing` はstrictまたはjson-fence-v1。後者は応答全体を囲む単一のMarkdown JSONコード枠だけを除去し、除去をログに記録する。手やJSON内部は変更しない。さくら接続では後者を既定とし、ローカル既定および過去の記録はstrict。これは受信形式の設定で、ゲームルールv1とリプレイの状態遷移には影響しない。
+
 ## 保存・評価
 
 対局は逐次 JSONL (header/decision/end)、headerに初期状態と設定、各decisionに状態、選択経路、説明、メモ、時間、遷移数、API transcript。途中終了でも既存行を保持。viewerは保存盤面で巻き戻し、検証CLIは初期状態から操作を再実行して一致を確認する。局面分岐は任意のリプレイ時点の完全状態を引き継ぎ、プレイヤー設定とメモをリセット。3条件で同一局面を比較可能。

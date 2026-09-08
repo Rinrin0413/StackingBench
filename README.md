@@ -2,6 +2,8 @@
 
 LLM の盤面理解、先読み、攻防判断を観察するローカル対戦ラボ。SRS の到達可能な配置から1個ずつ選択し、7固定ごとに交代します。初期仕様は [docs/rules.md](docs/rules.md)、開発方針は [AGENTS.md](AGENTS.md) にあります。
 
+さくらのAI Engine の `preview/Kimi-K2.6` / `preview/gemma-4-31B-it` 接続を追加しました。環境変数 `SAKURA_AI_API_KEY` と実験手順は [docs/sakura.md](docs/sakura.md) を参照してください。
+
 ## 起動
 
 Node.js 22.8以上（検証環境は24.14）。外部パッケージのインストールは不要です。
@@ -81,6 +83,8 @@ npm run check
 |`src/engine.js`|ルール、SRS、合法手列挙、決定的状態遷移|
 |`src/observation.js`|公開観測と既知情報だけの試し読み|
 |`src/players.js`|共通プレイヤー接続口、評価探索、LLMプロトコルと予算|
+|`src/providers.js`|接続先・認証・秘密情報の除外・公開レートに基づく費用推定|
+|`src/probe.js`|対局と分離した生成の疎通確認|
 |`src/match.js`|対局進行、JSONL保存、集計|
 |`src/server.js`|ローカルHTTP APIと画面配信|
 |`web/`|対戦・リプレイ画面。描画にエンジンのセル形状・操作を共有|

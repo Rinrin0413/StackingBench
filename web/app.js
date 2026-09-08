@@ -2,7 +2,7 @@ import {SHAPES,cells,spawn,motion} from '/engine.js';
 const $=id=>document.getElementById(id),colors={I:'#72cfdb',J:'#7498ec',L:'#e6b570',O:'#ded479',S:'#85c39a',T:'#b699d5',Z:'#dd8e91',G:'#6c8580'};
 const labels={search:'探索 bot',llm:'LLM · 試し読みなし','llm-preview':'LLM · 試し読みあり'};
 let current=null,liveId=null,frame=0,follow=true,animation=0,noticeTimer,savedRuns=[];
-function modelLabel(config) {return config.type==='search'?'モデル不使用（固定評価）':config.model??'モデル名の記録なし';}
+function modelLabel(config) {return config.type==='search'?'モデル不使用（固定評価）':`${config.provider==='sakura'?'さくらのAI Engine · ':''}${config.model??'モデル名の記録なし'}`;}
 function savedIdentity() {
   const run=savedRuns.find(r=>r.id===$('saved-runs').value),container=$('saved-models');
   container.replaceChildren();container.hidden=!run;
@@ -59,6 +59,7 @@ function render() {
   const m=record?.metrics;
   $('decision-metrics').replaceChildren();
   if(m)for(const text of [`${(m.elapsedMs/1000).toFixed(2)} 秒`,`${m.transitions} 遷移`,`${m.calls} API`,`${m.completionTokens??'不明'} 出力 tokens`]){const span=document.createElement('span');span.textContent=text;$('decision-metrics').append(span);}
+  if(Number.isFinite(m?.estimatedCostJpy)){const span=document.createElement('span');span.textContent=`約 ${m.estimatedCostJpy.toFixed(3)} 円（公開レート）`;$('decision-metrics').append(span);}
   $('json-view').textContent=JSON.stringify(record?{move:record.move,result:state.last,metrics:m,summary:current.summary}:initial??{},null,2);
 }
 function player(key) {return {type:$(`type-${key}`).value,model:$(`model-${key}`).value,observation:$('observation').value,transitions:Number($('transitions').value),maxTokens:Number($('tokens').value),
@@ -88,7 +89,13 @@ $('open-run').onclick=catchErrors(async()=>{
   const all=await api(`/api/runs/${id}`),records=all.filter(r=>r.type==='decision'),end=all.findLast(r=>r.type==='end');
   current={id,header:all[0],records,state:end?.state??records.at(-1)?.state??all[0].initialState,summary:end?.summary};liveId=null;frame=records.length;follow=false;animation++;render();
 });
-$('probe').onclick=catchErrors(async()=>{const result=await api('/api/models');$('connection').textContent=`llama.cpp · ${result.models.length} models`;$('connection-dot').classList.add('online');notice('モデル一覧への接続に成功しました。生成・画像対応は各モデルで別途検証が必要です。');});
+$('probe').onclick=catchErrors(async()=>{
+  $('probe').disabled=true;$('connection').textContent='生成の疎通確認中…';
+  try {const model=$($('type-a').value==='search'&&$('type-b').value!=='search'?'model-b':'model-a').value;
+    const result=await api('/api/probe',{model});$('connection').textContent=result.ok?'生成の疎通確認成功':'疎通確認失敗';$('connection-dot').classList.toggle('online',result.ok);
+    notice(result.ok?`${result.model}: JSON応答を確認しました。${(result.elapsedMs/1000).toFixed(1)}秒。`:result.error??'JSON応答を確認できませんでした');
+  } finally {$('probe').disabled=false;}
+});
 for(const key of ['a','b'])$(`type-${key}`).onchange=()=>{$(`model-${key}`).parentElement.classList.toggle('dim',$(`type-${key}`).value==='search');render();};
-await catchErrors(async()=>{const config=await api('/api/config');for(const key of ['a','b']){for(const id of config.models)$(`model-${key}`).append(new Option(id,id));$(`type-${key}`).onchange();}await refresh();render();})();
+await catchErrors(async()=>{const config=await api('/api/config');for(const key of ['a','b']){for(const id of config.models)$(`model-${key}`).append(new Option(`${config.sakuraModels?.includes(id)?'さくら · ':''}${id}`,id));$(`type-${key}`).onchange();}await refresh();render();})();
 setInterval(catchErrors(async()=>{if(!liveId||!current?.busy&&!current?.running)return;const id=liveId;const snapshot=await api(`/api/matches/${id}`);if(liveId!==id)return;current=snapshot;if(follow)frame=current.records.length;render();if(!current.busy&&!current.running)await refresh();}),1500);

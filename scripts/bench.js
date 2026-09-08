@@ -1,12 +1,13 @@
 import {writeFile,mkdir} from 'node:fs/promises';
 import {Match,RUNS} from '../src/match.js';
-import {DEFAULT_MODEL} from '../src/players.js';
+import {DEFAULT_MODEL,playerConfig} from '../src/players.js';
 
 const args=process.argv.slice(2),option=(name,fallback)=>{const i=args.indexOf(`--${name}`);return i<0?fallback:args[i+1];};
 const seeds=option('seeds','101').split(',').map(Number),swap=args.includes('--swap');
 const model=option('model',DEFAULT_MODEL),maxLocks=Number(option('max-locks','280'));
-const settings={model,transitions:Number(option('transitions','32')),maxTokens:Number(option('max-tokens','2048')),thinking:option('thinking','server-default')};
-const players=[{...settings,type:option('a','search')},{...settings,type:option('b','search')}];
+const settings={model,transitions:Number(option('transitions','32')),maxTokens:Number(option('max-tokens','2048')),thinking:option('thinking','server-default'),
+  decisionTokens:Number(option('decision-tokens','8192')),timeoutMs:Number(option('timeout-ms','120000')),maxCalls:Number(option('max-calls','34'))};
+const players=[{...settings,model:option('model-a',model),type:option('a','search')},{...settings,model:option('model-b',model),type:option('b','search')}].map(playerConfig);
 const results=[];
 for(const seed of seeds) for(const first of swap?[0,1]:[0]) {
   const match=await Match.create({seeds:[seed,((seed^0x6c078965)>>>0)||1],first,maxLocks,players});

@@ -11,7 +11,8 @@ const report={kind:'single-position-comparison',at:new Date().toISOString(),pare
   initialState:state,initialHash:hashState(state),memo:'',results:[],note:'One decision per condition; not a match or strength estimate.'};
 await mkdir(RUNS,{recursive:true});
 for(const type of ['llm','llm-preview','search']) {
-  const config=playerConfig({type,model:option('model',DEFAULT_MODEL),thinking:option('thinking','server-default'),transitions:Number(option('transitions','32'))});
+  const config=playerConfig({type,model:option('model',DEFAULT_MODEL),thinking:option('thinking','server-default'),transitions:Number(option('transitions','32')),
+    maxTokens:Number(option('max-tokens','2048')),decisionTokens:Number(option('decision-tokens','8192')),timeoutMs:Number(option('timeout-ms','120000')),maxCalls:Number(option('max-calls','34'))});
   console.log(`Comparing ${type} from ${report.initialHash}`);
   try {const decision=await decide(state,config,{baseUrl:process.env.LLM_BASE_URL??'http://localhost:8082'});report.results.push({config,...decision,afterState:applyMove(state,decision.move).state});}
   catch(e) {report.results.push({config,error:{code:e.code,message:e.message,outcome:e.outcome,detail:e.detail}});}
