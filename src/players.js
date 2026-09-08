@@ -1,7 +1,7 @@
 import {performance} from 'node:perf_hooks';
 import {legalMoves,pendingCount} from './engine.js';
 import {observe,PreviewSession} from './observation.js';
-import {providerFor,endpointFor,authHeaders,redactSecret,estimatedCost} from './providers.js';
+import {providerFor,endpointFor,authHeaders,redactSecret,estimatedCost,thinkingParameters} from './providers.js';
 
 export const DEFAULT_MODEL='Qwen3.6-35B-A3B_UD-Q4_K_XL_128K-ctx_fast';
 export const QUICK_MODEL='Gemma-4-E2B_UD_Q4_K_XL_fast';
@@ -103,7 +103,7 @@ export async function llmDecision(game,config,{baseUrl='http://localhost:8082',m
       if(available<32) throw new DecisionError('token-budget','Decision generation budget exhausted','forfeit');
       const body={model:config.model,messages:structuredClone(messages),temperature:config.temperature,max_tokens:Math.min(config.maxTokens,available),stream:false};
       if(config.responseFormat!=='plain') body.response_format=config.responseFormat==='json'?{type:'json_object'}:{type:'json_object',schema:ACTION_SCHEMA};
-      if(config.thinking==='off') body.chat_template_kwargs={enable_thinking:false};
+      Object.assign(body,thinkingParameters(config));
       const record={request:body,provider:config.provider??'llamacpp',endpoint:baseUrl,startedAt:new Date().toISOString()}; trace.requests.push(record);metrics.calls++;
       const callStart=performance.now(); let data;
       try { data=await transport(baseUrl,body,config.timeoutMs);record.response=data; }

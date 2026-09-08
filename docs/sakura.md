@@ -34,7 +34,7 @@ UIのモデル選択にも両IDを追加。リプレイにモデルIDとprovider
 
 [公式利用手順](https://manual.sakura.ad.jp/cloud/ai-engine/02-howto.html)でBearer認証とchat/completionsのURLを確認しました。[公式OpenAPI](https://manual.sakura.ad.jp/api/cloud/portal/openapis/ai-engine-inference-api.json)にはmax_tokens、temperature、chat_template_kwargs、reasoning_effortがあります。chat/completionsのresponse_formatは掲載されていないため、さくら接続では本文JSON方式を使用し、schema/jsonモード指定は未確認エラーにします。
 
-思考は既定でサーバー設定を維持します。明示した `--thinking off` は `chat_template_kwargs.enable_thinking=false` を送り、実応答で効果を確認する別条件です。機能・モデルの利用可否は認証後の実測が必要です。
+思考は既定でサーバー設定を維持します。明示した `--thinking off` は、さくらのKimiには `chat_template_kwargs.thinking=false`、その他には `chat_template_kwargs.enable_thinking=false` を送る別条件です。Kimi固有のキーは[モデル作者の配信手順](https://huggingface.co/moonshotai/Kimi-K2.6)に基づきます。初回のKimi試行では汎用のenable_thinkingを送ってしまい、長文説明が本文に出て失格になりました。この試行は思考無効が成功した対局に数えません。実際の要求本文はログで確認できます。
 
 初回の実局面ではKimiが4096出力上限で思考中に打切られ、Gemmaは合法手JSONをMarkdownコード枠に入れて返しました。さくら接続の `responseParsing=json-fence-v1` は応答全体が単一のJSONコード枠の場合に枠だけを除去します。JSONの修復・手の変更・任意の説明文からのJSON抽出はしません。元の応答を残し、除去した場合は要求ログにresponseNormalizationを記録します。旧ログとローカル既定はstrictのままです。
 

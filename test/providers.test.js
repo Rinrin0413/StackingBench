@@ -2,9 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createGame,legalMoves} from '../src/engine.js';
 import {completion,llmDecision,playerConfig,parseAction} from '../src/players.js';
-import {SAKURA_BASE,SAKURA_MODELS,authHeaders,endpointFor,estimatedCost,accountKeyFromConfig} from '../src/providers.js';
+import {SAKURA_BASE,SAKURA_MODELS,authHeaders,endpointFor,estimatedCost,accountKeyFromConfig,thinkingParameters} from '../src/providers.js';
 
 const fakeKey='test-account:fake-secret-for-tests-only';
+test('thinking controls use the model template key and preserve server defaults',()=>{
+  assert.deepEqual(thinkingParameters(playerConfig({model:SAKURA_MODELS[0],thinking:'off'})),{chat_template_kwargs:{thinking:false}});
+  assert.deepEqual(thinkingParameters(playerConfig({model:SAKURA_MODELS[1],thinking:'off'})),{chat_template_kwargs:{enable_thinking:false}});
+  assert.deepEqual(thinkingParameters(playerConfig({thinking:'off'})),{chat_template_kwargs:{enable_thinking:false}});
+  assert.deepEqual(thinkingParameters(playerConfig({model:SAKURA_MODELS[0]})),{});
+});
 test('environment.d extraction reads only the exact named variable without expansion',()=>{
   assert.equal(accountKeyFromConfig(`OTHER_KEY=unrelated\nSAKURA_AI_API_KEY="${fakeKey}"\nPATH=/ignore`),fakeKey);
   assert.equal(accountKeyFromConfig('# SAKURA_AI_API_KEY=commented\nOTHER=unused'),null);

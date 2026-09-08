@@ -52,3 +52,7 @@ export function estimatedCost(model,prompt,completion) {
   const p=pricingFor(model);
   return p&&Number.isFinite(prompt)&&Number.isFinite(completion)?(prompt*p.inputPer10k+completion*p.outputPer10k)/10000:null;
 }
+export function thinkingParameters(config) {
+  if(config.thinking!=='off')return {};
+  return {chat_template_kwargs:config.provider==='sakura'&&config.model==='preview/Kimi-K2.6'?{thinking:false}:{enable_thinking:false}};
+}

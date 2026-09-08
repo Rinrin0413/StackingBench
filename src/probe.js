@@ -2,14 +2,14 @@ import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {completion,playerConfig,parseAction} from './players.js';
-import {endpointFor} from './providers.js';
+import {endpointFor,thinkingParameters} from './providers.js';
 
 // A single, recorded diagnostic request, separate from match results.
 export async function probeModel(model,{thinking='server-default',maxTokens=2048,timeoutMs=120000,transport=completion}={}) {
   const config=playerConfig({type:'llm',model,thinking,maxTokens,timeoutMs}),base=endpointFor(config);
   const request={model,messages:[{role:'user',content:'Return only the JSON object {"ok":true}, without markdown or commentary.'}],max_tokens:config.maxTokens,temperature:0,stream:false};
   if(config.provider==='llamacpp')request.response_format={type:'json_object',schema:{type:'object',properties:{ok:{type:'boolean'}},required:['ok'],additionalProperties:false}};
-  if(thinking==='off')request.chat_template_kwargs={enable_thinking:false};
+  Object.assign(request,thinkingParameters(config));
   const start=Date.now(),record={kind:'connection-probe',at:new Date().toISOString(),config,endpoint:base,request};
   try {
     record.response=await transport(base,request,timeoutMs);
