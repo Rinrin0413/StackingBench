@@ -120,3 +120,77 @@ test('LLM opponent uses its configured protocol then yields to human input',asyn
   const human=legalMoves(m.state)[0];await m.step({moveId:human.id,stateHash:hashState(m.state)});
   assert.equal(m.records[1].metrics.calls,0);await m.stop();
 });
+
+test('Codex session waits, previews within a persistent budget, and logs reproducible moves',async()=>{
+  const m=await Match.create({maxLocks:2,players:[{type:'codex',transitions:1},{type:'human'}]});
+  await m.run();assert.equal(m.records.length,0);assert.equal(m.agentStatus().ready,true);
+  await assert.rejects(()=>m.step(),/agent endpoint/);
+  const before=hashState(m.state),root=await m.agentObserve();
+  assert(root.prompt.includes('moveId'));assert(!root.prompt.includes('\"action\":\"choose\"'));
+  assert.equal(root.preview.enabled,true);assert.equal(m.config.players[0].model,null);assert.equal(m.config.connections[0],null);
+  const move=root.observation.legalMoves.find(m=>m.hold),preview={decisionId:root.decisionId,moveId:move.id,requestId:'one'};
+  const first=await m.agentAction('preview',preview);
+  assert.deepEqual(await m.agentAction('preview',preview),first);
+  assert.equal((await m.agentObserve()).preview.used,1);
+  assert.equal(hashState(m.state),before);
+  await assert.rejects(()=>m.agentAction('preview',{...preview,requestId:'two'}),/budget/);
+  await assert.rejects(()=>m.agentAction('preview',{...preview,moveId:'m9999'}),/different preview/);
+  await assert.rejects(()=>m.agentAction('choose',{decisionId:'stale',moveId:move.id}),/Stale/);
+  await assert.rejects(()=>m.agentAction('choose',{decisionId:root.decisionId,moveId:'missing'}),/Unknown root/);
+  assert.equal(hashState(m.state),before);assert.equal(m.records.length,0);
+  const response={decisionId:root.decisionId,moveId:move.id,memo:'Keep the center open.',reason:'Fixture response only',agentModel:'test-agent'};
+  const accepted=await m.agentAction('choose',response);
+  assert.equal(accepted.acceptedDecisionId,root.decisionId);assert.equal(m.state.locks,1);
+  assert.equal(m.records[0].metrics.transitions,1);assert.equal(m.records[0].metrics.completionTokens,null);
+  assert.equal(m.records[0].metrics.calls,0);assert.equal(m.records[0].trace.agentModel.value,'test-agent');
+  const next=await m.agentObserve();assert.notEqual(next.decisionId,root.decisionId);assert.equal(next.observation.memo,response.memo);
+  assert.equal(next.preview.used,0);
+  await assert.rejects(()=>m.agentAction('choose',response),/Stale/);assert.equal(m.state.locks,1);
+  await m.agentAction('choose',{decisionId:next.decisionId,moveId:next.observation.legalMoves[0].id});
+  const records=await readRun(m.id);let state=records[0].initialState;
+  for(const r of records.filter(r=>r.type==='decision')) {state=applyMove(state,r.move).state;assert.equal(hashState(state),r.afterHash);}
+  assert.equal(records.at(-1).summary[0].completionTokens,null);
+  assert.equal(records.at(-1).summary[0].estimatedCostJpy,null);
+  assert.deepEqual(records.find(r=>r.type==='decision').trace.request.observation,root.observation);
+  assert.equal(records.filter(r=>r.type==='agent-event'&&r.event==='observation').length,2);
+  assert(records.some(r=>r.type==='agent-event'&&r.event==='rejected'));
+  const ended=await m.agentObserve();assert.equal(ended.status,'finished');assert(!('observation' in ended));
+});
+test('Codex public observations and unknown-garbage previews do not disclose hidden state',async()=>{
+  const game=createGame();game.players[0].pending=[1];
+  const changed=structuredClone(game);changed.seeds=[123,456];
+  for(const [i,p] of changed.players.entries()) {
+    p.pieceRng.value=9876;p.garbageRng.value=54321;p.bag.reverse();
+    if(i===0)p.queue[5]=p.queue[5]==='T'?'J':'T';else{p.queue.reverse();p.current='O';}
+  }
+  const roots=[],previews=[];
+  for(const state of [game,changed]) {
+    const m=await Match.create({initialState:state,players:[{type:'codex'},{type:'human'}]}),root=await m.agentObserve();
+    roots.push(root.observation);
+    const forbidden=new Set(['seeds','pieceRng','garbageRng','bag']);
+    const walk=x=>{if(x&&typeof x==='object')for(const [k,v] of Object.entries(x)){assert(!forbidden.has(k));walk(v);}};walk(root);
+    assert(!('current' in root.observation.opponent));assert(!('next' in root.observation.opponent));assert.equal(root.observation.self.next.length,5);
+    const result=await m.agentAction('preview',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,requestId:'unknown'});
+    assert.equal(result.boundary,'unknown-garbage');assert.equal(result.observation,null);
+    const {decisionId,...rest}=result;previews.push(rest);await m.stop();
+    assert((await readRun(m.id)).some(r=>r.event==='preview')); // Even without a chosen move.
+  }
+  assert.deepEqual(roots[0],roots[1]);assert.deepEqual(previews[0],previews[1]);
+});
+test('Codex without previews cannot simulate and cannot move during the human turn',async()=>{
+  const game=createGame();game.remaining=1;
+  const m=await Match.create({initialState:game,players:[{type:'codex',preview:false},{type:'human'}]});
+  const root=await m.agentObserve();assert.equal(root.preview.enabled,false);assert.equal(root.preview.budget,0);
+  await assert.rejects(()=>m.agentAction('preview',{decisionId:root.decisionId,moveId:'m0000',requestId:'x'}),/disabled/);
+  await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id});
+  assert.equal(m.state.active,1);await m.run();assert.equal(m.state.locks,1);
+  const status=await m.agentObserve();assert.equal(status.ready,false);assert(!('observation' in status));
+  await assert.rejects(()=>m.agentAction('choose',{decisionId:root.decisionId,moveId:'m0000'}),/Not a Codex turn/);
+  assert.equal(m.state.status,'playing');await m.stop();
+});
+test('Codex operations serialize and stopping during observation is honored',async()=>{
+  const m=await Match.create({players:[{type:'codex'},{type:'human'}]});
+  const pending=m.agentObserve();await assert.rejects(()=>m.agentObserve(),/already running/);
+  await m.stop();await pending;assert.equal(m.state.status,'aborted');assert.equal(m.busy,false);
+  assert.equal((await readRun(m.id)).at(-1).status,'aborted');
+});

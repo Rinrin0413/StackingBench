@@ -1,8 +1,8 @@
 import {SHAPES,cells,spawn,motion,fits,spinType} from '/engine.js';
 const $=id=>document.getElementById(id),colors={I:'#72cfdb',J:'#7498ec',L:'#e6b570',O:'#ded479',S:'#85c39a',T:'#b699d5',Z:'#dd8e91',G:'#6c8580'};
-const labels={human:'人間（あなた）',search:'探索 bot',llm:'LLM · 試し読みなし','llm-preview':'LLM · 試し読みあり'};
+const labels={codex:'Codex · このセッション',human:'人間（あなた）',search:'探索 bot',llm:'LLM · 試し読みなし','llm-preview':'LLM · 試し読みあり'};
 let current=null,liveId=null,frame=0,follow=true,animation=0,noticeTimer,savedRuns=[],draft=null,submitting=false;
-function modelLabel(config) {return config.type==='human'?'ブラウザ操作':config.type==='search'?'モデル不使用（固定評価）':`${config.provider==='sakura'?'さくらのAI Engine · ':''}${config.model??'モデル名の記録なし'}`;}
+function modelLabel(config) {return config.type==='codex'?'Codex セッション接続（モデルは未検証）':config.type==='human'?'ブラウザ操作':config.type==='search'?'モデル不使用（固定評価）':`${config.provider==='sakura'?'さくらのAI Engine · ':''}${config.model??'モデル名の記録なし'}`;}
 function savedIdentity() {
   const run=savedRuns.find(r=>r.id===$('saved-runs').value),container=$('saved-models');
   container.replaceChildren();container.hidden=!run;
@@ -45,15 +45,15 @@ function render() {
   $('lock-label').textContent=`${state?.locks??0} / ${state?.rules.maxLocks??280} LOCKS`;
   $('timeline').max=records.length;$('timeline').value=frame;$('frame').textContent=`${frame} / ${records.length}`;
   const playable=liveId&&current?.state.status==='playing';
-  $('step').disabled=!playable||current.busy||current.running||!!current.human;$('run').disabled=!playable||current.busy||current.running||!!current.human;
+  $('step').disabled=!playable||current.busy||current.running||!!current.human||!!current.agentWaiting;$('run').disabled=!playable||current.busy||current.running||!!current.human||!!current.agentWaiting;
   $('run').textContent=current?.header.config.players.some(p=>p.type==='human')?'▶ 相手の番を進める':'▶ 自動対戦';
   $('stop').disabled=!playable||current.stopRequested;$('create').disabled=!!(current?.busy||current?.running);
   $('fork').disabled=!state||state.status!=='playing'||current?.busy||current?.running;$('path').disabled=!record?.move||!!(liveId&&current?.human&&frame===records.length);
   $('prev').disabled=frame===0;$('next').disabled=frame===records.length;
-  $('badge').textContent=!current?'READY':current.busy?'THINKING':!liveId||frame<records.length?'REPLAY':current.state.status==='playing'?(current.human?'YOUR TURN':'LIVE'):current.state.status.toUpperCase();
+  $('badge').textContent=!current?'READY':current.busy?'THINKING':!liveId||frame<records.length?'REPLAY':current.state.status==='playing'?(current.human?'YOUR TURN':current.agentWaiting?'CODEX WAIT':'LIVE'):current.state.status.toUpperCase();
   $('match-label').textContent=current?`${current.header.config.players.map(p=>labels[p.type]).join(' vs ')}${frame<records.length?' · REPLAY':''}`:'対局を作成して開始';
   const end=current?.state;
-  $('progress').textContent=current?.runtimeError?`保存/実行エラー: ${current.runtimeError}`:current?.stopRequested&&current.busy?'現在の判断後に停止します':current?.busy?'判断中 · 応答を待っています':end&&end.status!=='playing'?`${end.winner===null?'勝者なし':`Player ${end.winner===0?'A':'B'} 勝利`} / ${end.reason}`:current?.human?'あなたの番です · 7固定で交代':liveId?'次の判断を開始できます':'リプレイ操作 / 局面から比較';
+  $('progress').textContent=current?.runtimeError?`保存/実行エラー: ${current.runtimeError}`:current?.stopRequested&&current.busy?'現在の判断後に停止します':current?.busy?'判断中 · 応答を待っています':end&&end.status!=='playing'?`${end.winner===null?'勝者なし':`Player ${end.winner===0?'A':'B'} 勝利`} / ${end.reason}`:current?.agentWaiting?'Codex の入力を待っています':current?.human?'あなたの番です · 7固定で交代':liveId?'次の判断を開始できます':'リプレイ操作 / 局面から比較';
   $('decision-label').textContent=record?`#${frame} · PLAYER ${record.actor===0?'A':'B'} · ${record.move?.id??record.error?.code}`:'WAITING FOR FIRST MOVE';
   $('reason').textContent=record?.error?`${record.error.code}: ${record.error.message}`:record?.reason??'選択理由、作戦メモ、実際の結果をここに表示します。';
   $('memo').textContent=record?.memo?`作戦メモ: ${record.memo}`:'';
@@ -62,8 +62,21 @@ function render() {
   if(m)for(const text of [`${(m.elapsedMs/1000).toFixed(2)} 秒`,`${m.transitions} 遷移`,`${m.calls} API`,`${m.completionTokens??'不明'} 出力 tokens`]){const span=document.createElement('span');span.textContent=text;$('decision-metrics').append(span);}
   if(Number.isFinite(m?.estimatedCostJpy)){const span=document.createElement('span');span.textContent=`約 ${m.estimatedCostJpy.toFixed(3)} 円（公開レート）`;$('decision-metrics').append(span);}
   $('json-view').textContent=JSON.stringify(record?{move:record.move,result:state.last,metrics:m,summary:current.summary}:initial??{},null,2);
-  renderHuman();
+  renderHuman();renderAgent();
 }
+function renderAgent() {
+  const configs=current?.header.config.players??[];
+  $('agent-controls').hidden=!configs.some(p=>p.type==='codex');
+  if($('agent-controls').hidden)return;
+  $('agent-match-id').value=current.id;
+  $('copy-agent-request').disabled=!liveId||current.state.status!=='playing';
+  $('agent-status').textContent=!liveId?'保存された Codex 対局':current.state.status!=='playing'?'対局は終了しました':current.agentWaiting?'Codex の入力待ちです':'人間または相手プレイヤーの番です';
+  $('agent-config').textContent=configs.filter(p=>p.type==='codex').map(p=>p.preview?`試し読みあり · ${p.transitions} 遷移 / 判断`:'試し読みなし').join(' / ');
+}
+$('copy-agent-request').onclick=catchErrors(async()=>{
+  await navigator.clipboard.writeText(`StackingBench の対局 ${current.id} で Codex として対戦開始してください。docs/codex-player.md の手順に従い、専用の agent コマンドだけで公開盤面を読み、手を選んでください。`);
+  notice('対戦依頼をコピーしました。この会話に貼り付けてください。');
+});
 function canInput() {
   return !!(liveId&&current?.human&&!current.busy&&!current.running&&!submitting&&frame===current.records.length);
 }
@@ -86,7 +99,7 @@ function renderHuman() {
   $('human-controls').hidden=!current?.header.config.players.some(p=>p.type==='human')||!liveId||current.state.status!=='playing';
   $('human-latest').hidden=!current?.human||frame===current.records.length;
   for(const button of document.querySelectorAll('[data-input]'))button.disabled=!available;
-  if(!available){$('human-status').textContent=submitting?'配置を保存しています…':current?.human?'最新の局面に戻ると操作できます':'相手の判断を待っています';return;}
+  if(!available){$('human-status').textContent=submitting?'配置を保存しています…':current?.human?'最新の局面に戻ると操作できます':current?.agentWaiting?'Codex の入力を待っています':'相手の判断を待っています';return;}
   if(draft?.hash!==current.human.stateHash)resetDraft();
   const move=landingMove(),actor=current.state.active,key=actor===0?'a':'b',p=current.state.players[actor];
   drawBoard(`board-${key}`,p.board);
@@ -130,12 +143,12 @@ document.addEventListener('keydown',catchErrors(async e=>{
   if(e.repeat&&!['L','R','D'].includes(op))return;
   await humanInput(op);
 }));
-function player(key) {return {type:$(`type-${key}`).value,model:$(`model-${key}`).value,observation:$('observation').value,transitions:Number($('transitions').value),maxTokens:Number($('tokens').value),
+function player(key) {return {type:$(`type-${key}`).value,preview:$('codex-preview').value==='true',model:$(`model-${key}`).value,observation:$('observation').value,transitions:Number($('transitions').value),maxTokens:Number($('tokens').value),
   timeoutMs:Number($('timeout').value)*1000,temperature:Number($('temperature').value),thinking:$('thinking').value,decisionTokens:Number($('decision-tokens').value),maxCalls:Number($('max-calls').value),requestIntervalMs:Number($('request-interval').value)*1000};}
 async function create(parent) {
   current=await api('/api/matches',{players:[player('a'),player('b')],seeds:[Number($('seed-a').value),Number($('seed-b').value)],first:Number($('first').value),maxLocks:Number($('max-locks').value),...(parent?{parent}:{})});
   liveId=current.id;frame=0;follow=true;animation++;draft=null;sessionStorage.setItem('stackingbench-live',liveId);
-  if(current.header.config.players.some(p=>p.type==='human'))current=await api(`/api/matches/${liveId}/run`,{});
+  if(current.header.config.players.some(p=>['human','codex'].includes(p.type)))current=await api(`/api/matches/${liveId}/run`,{});
   render();focusBoard();await refresh();
 }
 $('setup').addEventListener('submit',catchErrors(async e=>{e.preventDefault();await create();}));
@@ -150,7 +163,7 @@ $('path').onclick=catchErrors(async()=>{
   for(const op of record.move.path){if(token!==animation)return;pos=motion(board,record.move.piece,pos,op);drawBoard(`board-${key}`,board,{piece:record.move.piece,cells:cells(record.move.piece,pos)});await new Promise(r=>setTimeout(r,100));}
   if(token===animation)render();
 });
-async function refresh(){savedRuns=await api('/api/runs');const selected=$('saved-runs').value;$('saved-runs').replaceChildren(new Option('リプレイを選択',''));for(const r of savedRuns){const matchup=r.players.map(p=>['search','human'].includes(p.type)?labels[p.type]:`${p.model??'モデル不明'} (${labels[p.type]})`).join(' vs ');$('saved-runs').append(new Option(`${r.createdAt.slice(5,16).replace('T',' ')} · ${matchup} · ${r.locks}手 · ${r.status}`,r.id));}$('saved-runs').value=selected;savedIdentity();}
+async function refresh(){savedRuns=await api('/api/runs');const selected=$('saved-runs').value;$('saved-runs').replaceChildren(new Option('リプレイを選択',''));for(const r of savedRuns){const matchup=r.players.map(p=>['search','human','codex'].includes(p.type)?labels[p.type]:`${p.model??'モデル不明'} (${labels[p.type]})`).join(' vs ');$('saved-runs').append(new Option(`${r.createdAt.slice(5,16).replace('T',' ')} · ${matchup} · ${r.locks}手 · ${r.status}`,r.id));}$('saved-runs').value=selected;savedIdentity();}
 $('saved-runs').onchange=savedIdentity;
 $('refresh').onclick=catchErrors(refresh);
 $('open-run').onclick=catchErrors(async()=>{
@@ -166,6 +179,6 @@ $('probe').onclick=catchErrors(async()=>{
     notice(result.ok?`${result.model}: JSON応答を確認しました。${(result.elapsedMs/1000).toFixed(1)}秒。`:result.error??'JSON応答を確認できませんでした');
   } finally {$('probe').disabled=false;}
 });
-for(const key of ['a','b'])$(`type-${key}`).onchange=()=>{const unused=['search','human'].includes($(`type-${key}`).value);$(`model-${key}`).disabled=unused;$(`model-${key}`).parentElement.classList.toggle('dim',unused);render();};
+for(const key of ['a','b'])$(`type-${key}`).onchange=()=>{const unused=['search','human','codex'].includes($(`type-${key}`).value);$(`model-${key}`).disabled=unused;$(`model-${key}`).parentElement.classList.toggle('dim',unused);render();};
 await catchErrors(async()=>{const config=await api('/api/config');for(const key of ['a','b']){for(const id of config.models)$(`model-${key}`).append(new Option(`${config.sakuraModels?.includes(id)?'さくら · ':''}${id}`,id));$(`type-${key}`).onchange();}await refresh();const saved=sessionStorage.getItem('stackingbench-live');if(saved){try{current=await api(`/api/matches/${saved}`);liveId=saved;frame=current.records.length;}catch{sessionStorage.removeItem('stackingbench-live');}}render();})();
-setInterval(catchErrors(async()=>{if(!liveId||!current?.busy&&!current?.running)return;const id=liveId;const snapshot=await api(`/api/matches/${id}`);if(liveId!==id)return;current=snapshot;if(follow)frame=current.records.length;render();if(current.human&&follow)focusBoard();if(!current.busy&&!current.running)await refresh();}),1500);
+setInterval(catchErrors(async()=>{if(!liveId||!current?.busy&&!current?.running&&!(current?.hasAgent&&current.state.status==='playing'))return;const id=liveId,previousCount=current.records.length,wasHuman=!!current.human;const snapshot=await api(`/api/matches/${id}`);if(liveId!==id||submitting||snapshot.records.length<current.records.length)return;current=snapshot;if(follow)frame=current.records.length;render();if(current.human&&follow&&!wasHuman)focusBoard();if(!current.busy&&!current.running&&current.records.length!==previousCount)await refresh();}),1500);

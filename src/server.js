@@ -48,6 +48,23 @@ const server=createServer(async(req,res)=>{
       }
       const match=await Match.create(options);matches.set(match.id,match);return json(res,201,match.snapshot());
     }
+    if(req.method==='GET'&&path==='/api/agent/matches')return json(res,200,[...matches.values()]
+      .filter(m=>m.config.players.some(p=>p.type==='codex')).map(m=>({...m.agentStatus(),players:m.config.players.map(p=>({type:p.type,model:p.model??null}))})));
+    const agent=path.match(/^\/api\/agent\/matches\/([a-zA-Z0-9_-]+)(?:\/(status|preview|choose))?$/);
+    if(agent) {
+      const match=matches.get(agent[1]);if(!match)return json(res,404,{error:'Match not loaded'});
+      if(!match.config.players.some(p=>p.type==='codex'))return json(res,400,{error:'This match has no Codex player'});
+      if(req.method==='GET'&&agent[2]==='status')return json(res,200,match.agentStatus());
+      if(req.method==='GET'&&!agent[2])return json(res,200,await match.agentObserve());
+      if(req.method==='POST'&&['preview','choose'].includes(agent[2])) {
+        const input=await body(req);
+        if(probeBusy||[...matches.values()].some(m=>m!==match&&(m.busy||m.running)))return json(res,409,{error:'Another request is running'});
+        const result=await match.agentAction(agent[2],input);
+        if(agent[2]==='choose')match.run().catch(e=>{match.runtimeError=e.message;console.error(e);});
+        return json(res,200,result);
+      }
+      return json(res,404,{error:'Unknown agent action'});
+    }
     const target=path.match(/^\/api\/matches\/([a-zA-Z0-9_-]+)(?:\/(step|run|stop))?$/);
     if(target) {
       const match=matches.get(target[1]);if(!match) return json(res,404,{error:'Match not loaded; open it in replay'});
@@ -58,6 +75,7 @@ const server=createServer(async(req,res)=>{
         if(target[2]==='stop') await match.stop();
         else if(target[2]==='step') {
           if(match.busy||match.running) return json(res,409,{error:'Decision already running'});
+          if(match.isAgentTurn())return json(res,409,{error:'Codex input is required; use the agent endpoint'});
           if(match.isHumanTurn()) {
             await match.step(input);
             match.run().catch(e=>{match.runtimeError=e.message;console.error(e);});

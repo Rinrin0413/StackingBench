@@ -13,6 +13,12 @@ export function playerConfig(value={}) {
     if(value.observation!==undefined&&value.observation!=='text') throw Error('Only text observation encoding is supported');
     return {type:'human',observation:'text',input:'srs-controls-v1'};
   }
+  if(value.type==='codex') {
+    const preview=value.preview??true,transitions=value.transitions??32;
+    if(value.observation!==undefined&&value.observation!=='text')throw Error('Only text observations are implemented');
+    if(typeof preview!=='boolean'||!Number.isInteger(transitions)||transitions<1||transitions>2048)throw Error('Invalid Codex preview settings');
+    return {type:'codex',observation:'text',input:'codex-session-v1',preview,transitions,model:null};
+  }
   const provider=value.provider??providerFor(value.model??DEFAULT_MODEL);
   const p={...DEFAULT_PLAYER,...(provider==='sakura'?{responseFormat:'plain',responseParsing:'json-fence-v1'}:{}),...value,provider};
   if(!['llamacpp','sakura'].includes(provider))throw Error('Unknown provider');
@@ -79,7 +85,14 @@ export function parseAction(content,mode='strict') {
 }
 export const ACTION_SCHEMA={type:'object',properties:{action:{type:'string',enum:['choose','preview']},move:{type:'string'},node:{type:'string'},memo:{type:'string'},reason:{type:'string'}},required:['action','move'],additionalProperties:false};
 export function systemPrompt(config,rules) {
-  return `You are a player in StackingBench, a turn-based falling-block duel. Win by making the opponent top out. Each player locks ${rules.locksPerTurn} pieces then yields. One decision locks one piece. HOLD does not consume a lock. SRS paths and game outcomes are computed by the engine. Coordinates and every board row are supplied in the observation. Opponent NEXT and all future garbage holes are private.\nRules: ${JSON.stringify(rules)}\nAttack arrays are indexed by cleared lines. A difficult clear is four lines or a line-clearing T-spin; repeated difficult clears add b2bBonus. A zero-line lock preserves B2B; a normal 1-3 line clear breaks it. REN starts at -1, increments on clear and resets on zero lines. Perfect clear adds perfectClear. Attack cancels your pending garbage FIFO, then sends the remainder. A zero-line lock raises all remaining pending garbage with unknown holes. After clearing and raising, cells in the first hiddenRows=4 rows lose. A blocked spawn also loses. At maxLocks the game draws.\nChoose only an ID from root legalMoves. Candidate spin is the engine's pre-clear classification; no candidate is ranked. Return one JSON object: {"action":"choose","move":"root move ID","memo":"optional short plan for next decision (max 240 characters)","reason":"optional brief explanation (max 400 characters)"}. Explanations are self-reports, not proof of internal reasoning. Your previous memo and last outcome appear in each fresh decision.\n${config.type==='llm-preview'?`You may first request the preview tool using {"action":"preview","node":"root or prior node ID","move":"ID from that node"}. Tool replies contain a hypothetical observation and local legalMoves. A boundary stops expansion. Preview budget: ${config.transitions} state transitions. Final choose must name a ROOT move, never a deeper node's move. You need not use all previews.`:'No preview tools are available. Select directly from root legalMoves.'}`;
+  const session=config.type==='codex',preview=config.type==='llm-preview'||session&&config.preview;
+  const chooseContract=session
+    ? 'Use the agent choose command with a JSON file: {"decisionId":"current decisionId","moveId":"root move ID","memo":"optional short plan for next decision (max 240 characters)","reason":"optional brief explanation (max 400 characters)"}.'
+    : 'Return one JSON object: {"action":"choose","move":"root move ID","memo":"optional short plan for next decision (max 240 characters)","reason":"optional brief explanation (max 400 characters)"}.';
+  const previewContract=session
+    ? 'Use the agent preview command with {"decisionId":"current decisionId","node":"root or prior node ID","moveId":"ID from that node","requestId":"unique preview ID"}.'
+    : 'You may first request the preview tool using {"action":"preview","node":"root or prior node ID","move":"ID from that node"}.';
+  return `You are a player in StackingBench, a turn-based falling-block duel. Win by making the opponent top out. Each player locks ${rules.locksPerTurn} pieces then yields. One decision locks one piece. HOLD does not consume a lock. SRS paths and game outcomes are computed by the engine. Coordinates and every board row are supplied in the observation. Opponent NEXT and all future garbage holes are private.\nRules: ${JSON.stringify(rules)}\nAttack arrays are indexed by cleared lines. A difficult clear is four lines or a line-clearing T-spin; repeated difficult clears add b2bBonus. A zero-line lock preserves B2B; a normal 1-3 line clear breaks it. REN starts at -1, increments on clear and resets on zero lines. Perfect clear adds perfectClear. Attack cancels your pending garbage FIFO, then sends the remainder. A zero-line lock raises all remaining pending garbage with unknown holes. After clearing and raising, cells in the first hiddenRows=4 rows lose. A blocked spawn also loses. At maxLocks the game draws.\nChoose only an ID from root legalMoves. Candidate spin is the engine's pre-clear classification; no candidate is ranked. ${chooseContract} Explanations are self-reports, not proof of internal reasoning. Your previous memo and last outcome appear in each fresh decision.\n${preview?`${previewContract} Tool replies contain a hypothetical observation and local legalMoves. A boundary stops expansion. Preview budget: ${config.transitions} state transitions. Final choose must name a ROOT move, never a deeper node's move. You need not use all previews.`:'No preview tools are available. Select directly from root legalMoves.'}`;
 }
 export async function completion(baseUrl,body,timeoutMs) {
   let response,raw;
@@ -163,6 +176,6 @@ export async function llmDecision(game,config,{baseUrl='http://localhost:8082',m
   }
 }
 export async function decide(game,config,options={}) {
-  if(config.type==='human') throw Error('Human input required');
+  if(['human','codex'].includes(config.type)) throw Error('External player input required');
   return config.type==='search'?searchDecision(game,config):llmDecision(game,config,options);
 }

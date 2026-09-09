@@ -10,3 +10,5 @@
 - Use `npm test` and `npm run check` before committing. Add meaningful engine/regression tests for semantics, not cosmetic UI tests.
 - Do not introduce official-product or endorsement wording. Use StackingBench in product copy. Do not include the name or abbreviation of the external turn-based game discussed in planning anywhere in repository files.
 - Keep changes focused and use Git commits. No remote publishing is implied. Runtime logs belong in ignored `runs/`.
+
+- When explicitly asked to play as the Codex opponent, read `docs/codex-player.md` and use only the dedicated `scripts/agent.js` interface for match information and decisions. Do not inspect complete run logs, viewer APIs, seeds, or private engine state during play, and do not delegate move selection to a search program. Implementation and fixture tests are separate from actual play.

@@ -6,6 +6,7 @@ import {performance} from 'node:perf_hooks';
 import {createGame,clone,legalMoves,applyMove,publicMove,replayPath,pendingCount} from './engine.js';
 import {playerConfig,decide,DecisionError} from './players.js';
 import {endpointFor,pricingFor} from './providers.js';
+import {AgentTurn} from './agent.js';
 
 export const RUNS=resolve(process.env.STACKINGBENCH_RUNS??'runs');
 export const hashState=state=>createHash('sha256').update(JSON.stringify(state)).digest('hex');
@@ -51,13 +52,13 @@ export class Match {
     if(players.length!==2) throw Error('Two player configurations required');
     const initial=options.initialState?clone(options.initialState):createGame(options);
     if(initial.rules.version!==1||initial.status!=='playing') throw Error('Only active v1 positions can be resumed');
-    const config={players,baseUrl:endpointFor({provider:'llamacpp'}),connections:players.map(p=>['search','human'].includes(p.type)?null:{provider:p.provider,baseUrl:endpointFor(p),pricing:p.provider==='sakura'?pricingFor(p.model):null}),parent:options.parent??null};
+    const config={players,baseUrl:endpointFor({provider:'llamacpp'}),connections:players.map(p=>['search','human','codex'].includes(p.type)?null:{provider:p.provider,baseUrl:endpointFor(p),pricing:p.provider==='sakura'?pricingFor(p.model):null}),parent:options.parent??null};
     const m=new Match();
     m.id=`${new Date().toISOString().replace(/[:.]/g,'-')}_${randomUUID().slice(0,8)}`;
     m.state=initial;m.config=config;m.records=[];m.memos=['',''];m.running=false;m.busy=false;m.stopRequested=false;m.ended=false;
     let sourceRevision=null,sourceDirty=null;
     try {sourceRevision=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();sourceDirty=!!execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim();} catch { /* Initial uncommitted workspace. */ }
-    const sourceFiles=['engine.js','observation.js','players.js','match.js','providers.js'];
+    const sourceFiles=['engine.js','observation.js','players.js','match.js','providers.js','agent.js'];
     const sourceHash=createHash('sha256');for(const file of sourceFiles)sourceHash.update(await readFile(new URL(file,import.meta.url)));
     m.header={type:'header',format:1,id:m.id,createdAt:new Date().toISOString(),config,initialState:clone(initial),initialHash:hashState(initial),
       runtime:process.version,engineVersion:'0.1.0',sourceRevision,sourceDirty,sourceHash:sourceHash.digest('hex')};
@@ -73,9 +74,58 @@ export class Match {
     await this.write(end);this.ended=true;this.running=false;
   }
   isHumanTurn() { return this.state.status==='playing'&&this.config.players[this.state.active].type==='human'; }
+  isAgentTurn() { return this.state.status==='playing'&&this.config.players[this.state.active].type==='codex'; }
+  agentStatus() {
+    return {id:this.id,status:this.state.status,winner:this.state.winner,reason:this.state.reason??null,active:this.state.active,
+      locks:this.state.locks,remaining:this.state.remaining,busy:this.busy||this.running,
+      ready:this.isAgentTurn()&&!this.busy&&!this.running,
+      decisionId:this.isAgentTurn()?`${this.id}:${this.records.length}`:null};
+  }
+  async agentOperation(fn) {
+    if(this.busy||this.running)throw Error('A decision is already running');
+    if(!this.isAgentTurn())throw Error('Not a Codex turn');
+    this.busy=true;
+    try {return await fn();}
+    finally {this.busy=false;if(this.stopRequested&&this.state.status==='playing')await this.stop();}
+  }
+  async agentObserve() {
+    if(!this.isAgentTurn())return this.agentStatus();
+    return this.agentOperation(async()=>{
+      if(!this.agentTurn) {
+        const turn=new AgentTurn(this.state,this.config.players[this.state.active],this.memos[this.state.active],`${this.id}:${this.records.length}`);
+        await this.write({type:'agent-event',event:'observation',at:new Date().toISOString(),actor:this.state.active,request:turn.request});
+        this.agentTurn=turn;
+      }
+      return {id:this.id,status:this.state.status,ready:true,...clone(this.agentTurn.request),
+        preview:{...this.agentTurn.request.preview,used:this.agentTurn.session?.used??0}};
+    });
+  }
+  async agentAction(action,input) {
+    return this.agentOperation(async()=>{
+      if(!this.agentTurn)throw Error('Observe the position before submitting an action');
+      let result;
+      try {
+        if(action==='preview')result=this.agentTurn.preview(input);
+        else if(action==='choose')result=this.agentTurn.decision(input);
+        else throw Error('Unknown agent action');
+      } catch(e) {
+        this.agentTurn.errors++;
+        await this.write({type:'agent-event',event:'rejected',at:new Date().toISOString(),decisionId:this.agentTurn.id,
+          action,input,error:{code:'agent-input',message:e.message}});
+        throw e;
+      }
+      await this.write({type:'agent-event',event:action,at:new Date().toISOString(),decisionId:this.agentTurn.id,input,
+        ...(action==='preview'?{response:result}:{})});
+      if(action==='preview')return result;
+      const record=await this.finishDecision(result);
+      this.agentTurn=null;
+      return {accepted:true,acceptedDecisionId:input.decisionId,moveId:record.move?.id??null,result:this.state.last,error:record.error??null,...this.agentStatus()};
+    });
+  }
   async step({moveId,stateHash,path,transport}={}) {
     if(this.busy) throw Error('A decision is already running');
     if(this.state.status!=='playing') throw Error('Match is not playing');
+    if(this.isAgentTurn())throw Error('Use the Codex agent endpoint to submit a decision');
     let humanDecision;
     if(this.isHumanTurn()) {
       if(stateHash!==hashState(this.state)) throw Error('Position changed; refresh before submitting');
@@ -92,10 +142,13 @@ export class Match {
         metrics:{elapsedMs:performance.now()-this.inputSince,pacingMs:0,transitions:0,calls:0,promptTokens:0,completionTokens:0,usageMissing:0,invalidResponses:0,cost:null}};
     } else if(moveId!==undefined||stateHash!==undefined||path!==undefined) throw Error('Manual input requires a human player');
     this.busy=true;
+    return this.finishDecision(humanDecision,transport);
+  }
+  async finishDecision(supplied,transport) {
     const actor=this.state.active,record={type:'decision',index:this.records.length,actor,beforeHash:hashState(this.state)};
     try {
       if(!legalMoves(this.state).length) throw new DecisionError('no-moves','No legal placements','forfeit');
-      const decision=humanDecision??await decide(this.state,this.config.players[actor],{baseUrl:this.config.baseUrl,memo:this.memos[actor],transport});
+      const decision=supplied??await decide(this.state,this.config.players[actor],{baseUrl:this.config.baseUrl,memo:this.memos[actor],transport});
       Object.assign(record,decision);
       this.state=applyMove(this.state,decision.move).state;
       this.memos[actor]=decision.memo;
@@ -115,7 +168,7 @@ export class Match {
     if(this.running||this.busy) throw Error('Match is already running');
     this.running=true;
     try {
-      while(this.state.status==='playing'&&!this.stopRequested&&!this.isHumanTurn()) {await this.step();await new Promise(r=>setImmediate(r));}
+      while(this.state.status==='playing'&&!this.stopRequested&&!this.isHumanTurn()&&!this.isAgentTurn()) {await this.step();await new Promise(r=>setImmediate(r));}
       if(this.stopRequested&&this.state.status==='playing') {this.state.status='aborted';this.state.reason='user-stop';await this.end();}
     } finally {this.running=false;}
   }
@@ -126,7 +179,7 @@ export class Match {
   snapshot() {
     const compact=r=>{const {trace,...rest}=r;return rest;};
     const result={id:this.id,header:this.header,state:this.state,records:this.records.map(compact),busy:this.busy,running:this.running,stopRequested:this.stopRequested,
-      runtimeError:this.runtimeError??null,summary:summarize(this.state,this.records)};
+      runtimeError:this.runtimeError??null,agentWaiting:this.isAgentTurn(),hasAgent:this.config.players.some(p=>p.type==='codex'),summary:summarize(this.state,this.records)};
     const humans=this.config.players.flatMap((p,i)=>p.type==='human'?[i]:[]);
     if(!humans.length) return result;
     const viewer=humans.length===1?humans[0]:this.state.active;
