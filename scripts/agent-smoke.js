@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {mkdir} from 'node:fs/promises';
 const {chromium}=await import(process.env.PLAYWRIGHT_MODULE??'playwright');
+const agentType=process.env.AGENT_TYPE??'codex',agentLabel=agentType==='agy'?'Antigravity':'Codex',waitBadge=agentType==='agy'?'AGY WAIT':'CODEX WAIT';
 const url=process.env.APP_URL??'http://127.0.0.1:3211';
 const cli=(args,input)=>new Promise((resolve,reject)=>{
   const child=spawn(process.execPath,['scripts/agent.js',...args],{env:{...process.env,STACKINGBENCH_URL:url},stdio:['pipe','pipe','pipe']});
@@ -15,11 +16,16 @@ try {
   const page=await browser.newPage({viewport:{width:1440,height:1150}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   await page.goto(url);await page.waitForFunction(()=>document.querySelector('#model-a').options.length>=3);
-  await page.selectOption('#type-a','codex');await page.selectOption('#type-b','human');await page.fill('#max-locks','15');
-  await page.click('#create');await page.waitForFunction(()=>document.querySelector('#badge').textContent==='CODEX WAIT');
+  if(agentType==='agy'){await page.selectOption('#type-b','agy');assert.equal(await page.inputValue('#agy-model-b'),'Gemini');assert(await page.locator('fieldset').nth(1).locator('#agy-model-b').isVisible());}
+  await page.selectOption('#type-a',agentType);await page.selectOption('#type-b','human');await page.fill('#max-locks','15');
+  await page.click('#create');await page.waitForFunction(badge=>document.querySelector('#badge').textContent===badge,waitBadge);
+  await page.evaluate(()=>{navigator.clipboard.writeText=async text=>{window.copiedRequest=text;};});
+  await page.click('#copy-agent-request');
+  assert.match(await page.evaluate(()=>window.copiedRequest),new RegExp(`docs/${agentType==='agy'?'agy':'codex'}-player.md`));
   const id=await page.inputValue('#agent-match-id');assert((await cli(['list'])).some(m=>m.id===id&&m.ready));
   assert(await page.isDisabled('#step'));assert(await page.isDisabled('#run'));assert(await page.isDisabled('[data-input="HD"]'));
-  assert(await page.isDisabled('#model-a'));assert.match(await page.textContent('#recorded-model-a'),/Codex.*GPT-6 Astra.*High/);
+  assert(await page.isDisabled('#model-a'));assert.match(await page.textContent('#recorded-model-a'),agentType==='agy'?/Antigravity.*Gemini/:/Codex.*GPT-6 Astra.*High/);
+  if(agentType==='agy'){assert.equal(await page.locator('#agy-identity-a input').count(),1);assert(await page.isHidden('#codex-identity-a'));assert(await page.isHidden('#model-a'));}
   let last;
   for(let i=0;i<7;i++) {
     const root=await cli(['observe',id]);
@@ -44,7 +50,7 @@ try {
     for(let j=0;j<Math.abs(offset);j++)await page.keyboard.press(offset<0?'ArrowLeft':'ArrowRight');
     await page.keyboard.press('Space');await page.waitForFunction(n=>Number(document.querySelector('#frame').textContent.split(' / ')[1])>=n,8+i);
   }
-  await page.waitForFunction(()=>document.querySelector('#badge').textContent==='CODEX WAIT');
+  await page.waitForFunction(badge=>document.querySelector('#badge').textContent===badge,waitBadge);
   const root=await cli(['wait',id,'--after',last.acceptedDecisionId,'--timeout-ms','2000']);assert.equal(root.ready,true);
   await page.setViewportSize({width:390,height:844});await mkdir('runs',{recursive:true});
   await page.screenshot({path:'runs/ui-agent-mobile.png',fullPage:true});
@@ -54,6 +60,6 @@ try {
   await page.waitForFunction(()=>document.querySelector('#badge').textContent==='FINISHED');
   const final=await cli(['wait',id,'--timeout-ms','100']);assert.equal(final.status,'finished');
   await page.click('#refresh');await page.selectOption('#saved-runs',id);await page.click('#open-run');
-  await page.waitForFunction(()=>document.querySelector('#badge').textContent==='REPLAY');assert.match(await page.textContent('#saved-models'),/Codex/);
-  assert.deepEqual(errors,[]);console.log(`Codex bridge fixture OK: ${id}; CLI, preview retry, wait, handoff, polling, replay, mobile`);
+  await page.waitForFunction(()=>document.querySelector('#badge').textContent==='REPLAY');assert.match(await page.textContent('#saved-models'),new RegExp(agentLabel));
+  assert.deepEqual(errors,[]);console.log(` ${agentLabel} bridge fixture OK: ${id}; CLI, preview retry, wait, handoff, polling, replay, mobile`);
 } finally {await browser.close();}

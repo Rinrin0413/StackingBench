@@ -12,3 +12,5 @@
 - Keep changes focused and use Git commits. No remote publishing is implied. Runtime logs belong in ignored `runs/`.
 
 - When explicitly asked to play as the Codex opponent, read `docs/codex-player.md` and use only the dedicated `scripts/agent.js` interface for match information and decisions. Do not inspect complete run logs, viewer APIs, seeds, or private engine state during play, and do not delegate move selection to a search program. Implementation and fixture tests are separate from actual play.
+
+- When explicitly asked to play as the Antigravity CLI (agy) opponent, read `docs/agy-player.md` and follow the same dedicated-agent-interface and public-information restrictions above. Do not delegate move selection to other agents.

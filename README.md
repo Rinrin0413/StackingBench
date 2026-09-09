@@ -124,3 +124,7 @@ npm run check
 HTTPの主な接続口は `GET /api/config`, `GET /api/models`, `POST /api/matches`, `POST /api/matches/:id/step|run|stop`, `GET /api/matches/:id`, `GET /api/runs`, `GET /api/runs/:id`。操作APIは非同期で202を返し、状態をポーリングします。任意のコマンド実行や任意のファイル読取りAPIはありません。
 
 大規模バッチ、画像入力、all-spin、操作列の直接生成は今回の範囲に含めていません。まずルールv1とプロンプトを固定して複数seed・先後交換で測定し、失格率や予算条件も併記する段階です。
+
+## Antigravity CLI (agy) を対戦相手にする
+
+プレイヤーに「Antigravity CLI (agy)」を選び、対局作成後の「対戦依頼をコピー」を agy の会話に貼り付けます。記録用モデル名は1欄で初期値は `Gemini`。公開観測・試し読み・選択は共通の専用CLIを使い、リプレイと保存一覧に Antigravity とモデル名を表示します。セッションの自動起動は行いません。[操作手順](docs/agy-player.md) を参照してください。

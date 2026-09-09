@@ -1,3 +1,4 @@
+export const isAgentPlayer=type=>['codex','agy'].includes(type);
 // Session metadata is supplied by the user or agent, never inferred from an API model selector.
 export function agentModel(value) {
   if(value===undefined||value===null||value==='')return null;
@@ -14,7 +15,7 @@ export function reasoningEffort(value) {
 export function agentExecution(config,input={}) {
   const suppliedModel=Object.hasOwn(input,'agentModel'),suppliedEffort=Object.hasOwn(input,'reasoningEffort');
   const model=agentModel(suppliedModel?input.agentModel:config.agentModel);
-  const effort=reasoningEffort(suppliedEffort?input.reasoningEffort:config.reasoningEffort);
+  const effort=config.type==='agy'?null:reasoningEffort(suppliedEffort?input.reasoningEffort:config.reasoningEffort);
   return {model,reasoningEffort:effort,provenance:{model:model?(suppliedModel?'agent-reported':'user-configured'):'unknown',
     reasoningEffort:effort?(suppliedEffort?'agent-reported':'user-configured'):'unknown'}};
 }

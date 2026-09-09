@@ -1,3 +1,4 @@
+import {isAgentPlayer} from './agent-identity.js';
 import {mkdir,appendFile,readFile,readdir} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
@@ -52,7 +53,7 @@ export class Match {
     if(players.length!==2) throw Error('Two player configurations required');
     const initial=options.initialState?clone(options.initialState):createGame(options);
     if(initial.rules.version!==1||initial.status!=='playing') throw Error('Only active v1 positions can be resumed');
-    const config={players,baseUrl:endpointFor({provider:'llamacpp'}),connections:players.map(p=>['search','human','codex'].includes(p.type)?null:{provider:p.provider,baseUrl:endpointFor(p),pricing:p.provider==='sakura'?pricingFor(p.model):null}),parent:options.parent??null};
+    const config={players,baseUrl:endpointFor({provider:'llamacpp'}),connections:players.map(p=>['search','human','codex','agy'].includes(p.type)?null:{provider:p.provider,baseUrl:endpointFor(p),pricing:p.provider==='sakura'?pricingFor(p.model):null}),parent:options.parent??null};
     const m=new Match();
     m.id=`${new Date().toISOString().replace(/[:.]/g,'-')}_${randomUUID().slice(0,8)}`;
     m.state=initial;m.config=config;m.records=[];m.memos=['',''];m.running=false;m.busy=false;m.stopRequested=false;m.ended=false;
@@ -74,7 +75,7 @@ export class Match {
     await this.write(end);this.ended=true;this.running=false;
   }
   isHumanTurn() { return this.state.status==='playing'&&this.config.players[this.state.active].type==='human'; }
-  isAgentTurn() { return this.state.status==='playing'&&this.config.players[this.state.active].type==='codex'; }
+  isAgentTurn() { return this.state.status==='playing'&&isAgentPlayer(this.config.players[this.state.active].type); }
   agentStatus() {
     return {id:this.id,status:this.state.status,winner:this.state.winner,reason:this.state.reason??null,active:this.state.active,
       locks:this.state.locks,remaining:this.state.remaining,busy:this.busy||this.running,
@@ -83,7 +84,7 @@ export class Match {
   }
   async agentOperation(fn) {
     if(this.busy||this.running)throw Error('A decision is already running');
-    if(!this.isAgentTurn())throw Error('Not a Codex turn');
+    if(!this.isAgentTurn())throw Error('Not an agent turn');
     this.busy=true;
     try {return await fn();}
     finally {this.busy=false;if(this.stopRequested&&this.state.status==='playing')await this.stop();}
@@ -125,7 +126,7 @@ export class Match {
   async step({moveId,stateHash,path,transport}={}) {
     if(this.busy) throw Error('A decision is already running');
     if(this.state.status!=='playing') throw Error('Match is not playing');
-    if(this.isAgentTurn())throw Error('Use the Codex agent endpoint to submit a decision');
+    if(this.isAgentTurn())throw Error('Use the agent endpoint to submit a decision');
     let humanDecision;
     if(this.isHumanTurn()) {
       if(stateHash!==hashState(this.state)) throw Error('Position changed; refresh before submitting');
@@ -179,7 +180,7 @@ export class Match {
   snapshot() {
     const compact=r=>{const {trace,...rest}=r;return rest;};
     const result={id:this.id,header:this.header,state:this.state,records:this.records.map(compact),busy:this.busy,running:this.running,stopRequested:this.stopRequested,
-      runtimeError:this.runtimeError??null,agentWaiting:this.isAgentTurn(),hasAgent:this.config.players.some(p=>p.type==='codex'),summary:summarize(this.state,this.records)};
+      runtimeError:this.runtimeError??null,agentWaiting:this.isAgentTurn(),hasAgent:this.config.players.some(p=>isAgentPlayer(p.type)),summary:summarize(this.state,this.records)};
     const humans=this.config.players.flatMap((p,i)=>p.type==='human'?[i]:[]);
     if(!humans.length) return result;
     const viewer=humans.length===1?humans[0]:this.state.active;

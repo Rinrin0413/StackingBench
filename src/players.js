@@ -1,4 +1,4 @@
-import {agentModel,reasoningEffort} from './agent-identity.js';
+import {isAgentPlayer,agentModel,reasoningEffort} from './agent-identity.js';
 import {performance} from 'node:perf_hooks';
 import {setTimeout as delay} from 'node:timers/promises';
 import {legalMoves,pendingCount} from './engine.js';
@@ -14,11 +14,11 @@ export function playerConfig(value={}) {
     if(value.observation!==undefined&&value.observation!=='text') throw Error('Only text observation encoding is supported');
     return {type:'human',observation:'text',input:'srs-controls-v1'};
   }
-  if(value.type==='codex') {
+  if(isAgentPlayer(value.type)) {
     const preview=value.preview??true,transitions=value.transitions??32;
     if(value.observation!==undefined&&value.observation!=='text')throw Error('Only text observations are implemented');
-    if(typeof preview!=='boolean'||!Number.isInteger(transitions)||transitions<1||transitions>2048)throw Error('Invalid Codex preview settings');
-    return {type:'codex',observation:'text',input:'codex-session-v1',preview,transitions,model:null,agentModel:agentModel(value.agentModel),reasoningEffort:reasoningEffort(value.reasoningEffort),metadataSource:'user-configured'};
+    if(typeof preview!=='boolean'||!Number.isInteger(transitions)||transitions<1||transitions>2048)throw Error('Invalid agent preview settings');
+    return {type:value.type,observation:'text',input:`${value.type}-session-v1`,preview,transitions,model:null,agentModel:agentModel(value.agentModel===undefined&&value.type==='agy'?'Gemini':value.agentModel),reasoningEffort:value.type==='agy'?null:reasoningEffort(value.reasoningEffort),metadataSource:'user-configured'};
   }
   const provider=value.provider??providerFor(value.model??DEFAULT_MODEL);
   const p={...DEFAULT_PLAYER,...(provider==='sakura'?{responseFormat:'plain',responseParsing:'json-fence-v1'}:{}),...value,provider};
@@ -86,7 +86,7 @@ export function parseAction(content,mode='strict') {
 }
 export const ACTION_SCHEMA={type:'object',properties:{action:{type:'string',enum:['choose','preview']},move:{type:'string'},node:{type:'string'},memo:{type:'string'},reason:{type:'string'}},required:['action','move'],additionalProperties:false};
 export function systemPrompt(config,rules) {
-  const session=config.type==='codex',preview=config.type==='llm-preview'||session&&config.preview;
+  const session=isAgentPlayer(config.type),preview=config.type==='llm-preview'||session&&config.preview;
   const chooseContract=session
     ? 'Use the agent choose command with a JSON file: {"decisionId":"current decisionId","moveId":"root move ID","memo":"optional short plan for next decision (max 240 characters)","reason":"optional brief explanation (max 400 characters)"}.'
     : 'Return one JSON object: {"action":"choose","move":"root move ID","memo":"optional short plan for next decision (max 240 characters)","reason":"optional brief explanation (max 400 characters)"}.';
@@ -177,6 +177,6 @@ export async function llmDecision(game,config,{baseUrl='http://localhost:8082',m
   }
 }
 export async function decide(game,config,options={}) {
-  if(['human','codex'].includes(config.type)) throw Error('External player input required');
+  if(['human','codex','agy'].includes(config.type)) throw Error('External player input required');
   return config.type==='search'?searchDecision(game,config):llmDecision(game,config,options);
 }

@@ -9,11 +9,11 @@ export class AgentTurn {
     this.config=config;this.id=decisionId;this.started=performance.now();this.moves=legalMoves(game);this.errors=0;
     this.session=config.preview?new PreviewSession(game,config.transitions):null;
     this.previews=new Map();
-    this.request={configuredExecution:agentExecution(config),protocol:'stackingbench.codex-session.v1',decisionId,
+    this.request={configuredExecution:agentExecution(config),protocol:`stackingbench.${config.type}-session.v1`,decisionId,
       prompt:systemPrompt(config,game.rules)+
-        '\nYou are playing through an existing Codex session. Use only the agent observation and preview endpoints for this match. Do not read full run files, viewer APIs, seeds, engine state, or use a separate search program to select moves. Submit one root move with decisionId and moveId through the agent choose command. The host does not call a model or automatically wake this session.',
+        `\nYou are playing through an existing ${config.type==='agy'?'Antigravity CLI (agy)':'Codex'} session. Use only the agent observation and preview endpoints for this match. Do not read full run files, viewer APIs, seeds, engine state, or use a separate search program to select moves. Submit one root move with decisionId and moveId through the agent choose command. The host does not call a model or automatically wake this session.`,
       observation:observe(game,this.moves,memo),preview:{enabled:config.preview,budget:config.preview?config.transitions:0},
-      context:'existing-codex-session; full conversation and internal reasoning are not captured'};
+      context:`existing-${config.type}-session; full conversation and internal reasoning are not captured`};
   }
   check(input,keys) {
     if(!input||typeof input!=='object'||Array.isArray(input))throw Error('JSON object required');
@@ -44,7 +44,7 @@ export class AgentTurn {
     return {execution,move:clone(move),memo:input.memo??'',reason:input.reason??'',
       metrics:{elapsedMs:performance.now()-this.started,pacingMs:0,transitions:this.session?.used??0,calls:0,
         promptTokens:null,completionTokens:null,usageMissing:1,invalidResponses:this.errors,cost:null,estimatedCostJpy:null},
-      trace:{source:'codex-session',request:clone(this.request),response:clone(input),
+      trace:{source:`${this.config.type}-session`,request:clone(this.request),response:clone(input),
         agentModel:{value:execution.model,provenance:execution.provenance.model},previews:clone(this.session?.history??[])}};
   }
 }

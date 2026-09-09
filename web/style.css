@@ -5,3 +5,5 @@
 .human-controls{border-top:1px solid var(--border);padding:16px 25px;background:#edf4ed}.human-controls[hidden]{display:none}.human-controls p{font-size:12px;color:#435e48;margin:0 0 12px;line-height:1.8}.human-buttons{display:flex;flex-wrap:wrap;gap:8px}.human-controls .human-help{font-size:10px;color:#6b8066;margin:12px 0 0}.board-wrap canvas:focus-visible{outline:3px solid #5086c6;outline-offset:3px}
 
 .agent-controls{padding:16px 25px;border-top:1px solid var(--border);background:#eef2f8}.agent-controls[hidden]{display:none}.agent-controls p{font-size:11px;line-height:1.8;margin:0 0 10px}.agent-controls label{max-width:500px}.agent-controls span{font-size:10px;color:#687c68;margin-left:12px}
+
+.model-label[hidden]{display:none}

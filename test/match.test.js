@@ -185,7 +185,7 @@ test('Codex without previews cannot simulate and cannot move during the human tu
   await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id});
   assert.equal(m.state.active,1);await m.run();assert.equal(m.state.locks,1);
   const status=await m.agentObserve();assert.equal(status.ready,false);assert(!('observation' in status));
-  await assert.rejects(()=>m.agentAction('choose',{decisionId:root.decisionId,moveId:'m0000'}),/Not a Codex turn/);
+  await assert.rejects(()=>m.agentAction('choose',{decisionId:root.decisionId,moveId:'m0000'}),/Not an agent turn/);
   assert.equal(m.state.status,'playing');await m.stop();
 });
 test('Codex operations serialize and stopping during observation is honored',async()=>{
@@ -221,4 +221,44 @@ test('Codex identity stays unknown without metadata and rejects invalid reasonin
   assert.equal(m.state.locks,0);
   await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,agentModel:null,reasoningEffort:null});
   assert.deepEqual(m.records[0].execution,{model:null,reasoningEffort:null,provenance:{model:'unknown',reasoningEffort:'unknown'}});
+});
+
+test('Antigravity bridge records a single model identity and replays the selected path',async()=>{
+  assert.equal(playerConfig({type:'agy'}).agentModel,'Gemini');
+  assert.equal(playerConfig({type:'agy',agentModel:''}).agentModel,null);
+  const m=await Match.create({maxLocks:2,players:[{type:'agy',transitions:1},{type:'human'}]});
+  await m.run();assert(m.isAgentTurn());assert(m.snapshot().hasAgent);
+  assert.equal(m.config.connections[0],null);
+  const root=await m.agentObserve(),move=root.observation.legalMoves[0];
+  assert.equal(root.protocol,'stackingbench.agy-session.v1');
+  assert.match(root.prompt,/Antigravity CLI/);
+  assert.equal(root.configuredExecution.model,'Gemini');
+  const serialized=JSON.stringify(root);
+  for(const secret of ['"seed"','"rng"','"queue"'])assert(!serialized.includes(secret));
+  const input={decisionId:root.decisionId,moveId:move.id,requestId:'agy-preview'};
+  const preview=await m.agentAction('preview',input);
+  assert.deepEqual(await m.agentAction('preview',input),preview);
+  await m.agentAction('choose',{decisionId:root.decisionId,moveId:move.id});
+  assert.equal(m.records[0].execution.model,'Gemini');
+  assert.equal(m.records[0].execution.reasoningEffort,null);
+  assert.equal(m.records[0].trace.source,'agy-session');
+  assert.equal(m.records[0].metrics.calls,0);
+  assert.deepEqual(applyMove(m.header.initialState,m.records[0].move).state,m.state);
+  const next=await m.agentObserve();
+  await m.agentAction('choose',{decisionId:next.decisionId,moveId:next.observation.legalMoves[0].id,agentModel:'Gemini custom'});
+  const saved=await readRun(m.id),listing=(await listRuns()).find(r=>r.id===m.id);
+  assert.equal(saved[0].config.players[0].type,'agy');
+  assert.equal(listing.executions[0][1].model,'Gemini custom');
+  assert.equal(saved.at(-1).status,'finished');
+});
+
+test('Antigravity without previews rejects simulation and waits during the human turn',async()=>{
+  const m=await Match.create({players:[{type:'agy',preview:false},{type:'human'}]});
+  const root=await m.agentObserve();
+  await assert.rejects(()=>m.agentAction('preview',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,requestId:'disabled'}),/disabled/);
+  await assert.rejects(()=>m.step(),/agent endpoint/);
+  await m.stop();
+  const human=await Match.create({players:[{type:'human'},{type:'agy'}]});
+  assert.equal((await human.agentObserve()).ready,false);
+  assert(!('observation' in await human.agentObserve()));await human.stop();
 });
