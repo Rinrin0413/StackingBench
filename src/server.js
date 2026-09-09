@@ -53,12 +53,18 @@ const server=createServer(async(req,res)=>{
       const match=matches.get(target[1]);if(!match) return json(res,404,{error:'Match not loaded; open it in replay'});
       if(req.method==='GET'&&!target[2]) return json(res,200,match.snapshot());
       if(req.method==='POST') {
-        await body(req);
+        const input=await body(req);
         if(['step','run'].includes(target[2])&&(probeBusy||[...matches.values()].some(m=>m!==match&&(m.busy||m.running)))) return json(res,409,{error:'Another request is running; execute matches sequentially'});
         if(target[2]==='stop') await match.stop();
         else if(target[2]==='step') {
           if(match.busy||match.running) return json(res,409,{error:'Decision already running'});
-          match.step().catch(e=>{match.runtimeError=e.message;console.error(e);});
+          if(match.isHumanTurn()) {
+            await match.step(input);
+            match.run().catch(e=>{match.runtimeError=e.message;console.error(e);});
+          } else {
+            if(Object.keys(input).length) throw Error('Manual input requires a human player');
+            match.step().catch(e=>{match.runtimeError=e.message;console.error(e);});
+          }
         } else if(target[2]==='run') {
           if(match.busy||match.running) return json(res,409,{error:'Match already running'});
           match.run().catch(e=>{match.runtimeError=e.message;console.error(e);});

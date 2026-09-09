@@ -9,6 +9,10 @@ export const QUICK_MODEL='Gemma-4-E2B_UD_Q4_K_XL_fast';
 export const DEFAULT_PLAYER={type:'search',observation:'text',model:DEFAULT_MODEL,transitions:32,temperature:0.2,maxTokens:2048,
   timeoutMs:120000,decisionTokens:8192,maxCalls:34,requestIntervalMs:0,responseFormat:'schema',responseParsing:'strict',thinking:'server-default'};
 export function playerConfig(value={}) {
+  if(value.type==='human') {
+    if(value.observation!==undefined&&value.observation!=='text') throw Error('Only text observation encoding is supported');
+    return {type:'human',observation:'text',input:'srs-controls-v1'};
+  }
   const provider=value.provider??providerFor(value.model??DEFAULT_MODEL);
   const p={...DEFAULT_PLAYER,...(provider==='sakura'?{responseFormat:'plain',responseParsing:'json-fence-v1'}:{}),...value,provider};
   if(!['llamacpp','sakura'].includes(provider))throw Error('Unknown provider');
@@ -158,4 +162,7 @@ export async function llmDecision(game,config,{baseUrl='http://localhost:8082',m
     e.detail={...e.detail,trace,metrics};throw e;
   }
 }
-export async function decide(game,config,options={}) { return config.type==='search'?searchDecision(game,config):llmDecision(game,config,options); }
+export async function decide(game,config,options={}) {
+  if(config.type==='human') throw Error('Human input required');
+  return config.type==='search'?searchDecision(game,config):llmDecision(game,config,options);
+}

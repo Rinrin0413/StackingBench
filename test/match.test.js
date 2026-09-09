@@ -52,3 +52,71 @@ test('crash-truncated final JSONL fragment keeps previous records readable',asyn
   const m=await Match.create();await appendFile(m.path,'{"type":"decision"');
   assert.equal((await readRun(m.id)).length,1);
 });
+
+test('human waits without generating, validates input, persists HOLD path and exact replay',async()=>{
+  const m=await Match.create({maxLocks:2,players:[{type:'human'},{type:'search'}]});
+  await m.run();assert.equal(m.records.length,0);assert.equal(m.running,false);
+  const before=hashState(m.state),move=legalMoves(m.state).find(m=>m.useHold);
+  for(const input of [{},{moveId:move.id,stateHash:'stale'},{moveId:'missing',stateHash:before},
+    {moveId:move.id,stateHash:before,path:['HD','HD']}, {moveId:move.id,stateHash:before,path:['L','HD']}]) {
+    await assert.rejects(()=>m.step(input));assert.equal(hashState(m.state),before);assert.equal(m.records.length,0);assert.equal(m.busy,false);
+  }
+  const input={moveId:move.id,stateHash:before,path:move.path};
+  const first=m.step(input);await assert.rejects(()=>m.step(input),/already running/);await first;
+  await assert.rejects(()=>m.step(input),/Position changed/);
+  const next=legalMoves(m.state).find(m=>!m.useHold);await m.step({moveId:next.id,stateHash:hashState(m.state),path:next.path});
+  const records=await readRun(m.id);let state=records[0].initialState;
+  assert.deepEqual(records[0].config.players[0],{type:'human',observation:'text',input:'srs-controls-v1'});
+  assert.equal(records[0].config.connections[0],null);
+  for(const r of records.filter(r=>r.type==='decision')) {
+    state=applyMove(state,r.move).state;assert.equal(hashState(state),r.afterHash);
+    assert.equal(r.metrics.calls,0);assert.equal(r.metrics.transitions,0);assert(r.metrics.elapsedMs>=0);
+    assert.deepEqual(r.trace.input.path,r.move.path);
+  }
+  assert.equal(records.at(-1).status,'finished');assert.equal(records.at(-1).summary[0].locks,2);
+});
+test('automated play yields at the human turn and resumes after seven human locks',async()=>{
+  const m=await Match.create({maxLocks:21,players:[{type:'search',transitions:8},{type:'human'}]});
+  await m.run();assert.equal(m.state.locks,7);assert.equal(m.state.active,1);assert.equal(m.running,false);
+  for(let i=0;i<7;i++) {
+    const moves=legalMoves(m.state);
+    // Test fixture placement minimizes landing height so the fixture survives the turn.
+    const move=moves.filter(m=>!m.useHold).sort((a,b)=>Math.min(...b.cells.map(c=>c[1]))-Math.min(...a.cells.map(c=>c[1])))[0];
+    await m.step({moveId:move.id,stateHash:hashState(m.state)});
+  }
+  assert.equal(m.state.active,0);assert.equal(m.state.locks,14);
+  await m.run();assert.equal(m.state.locks,21);assert.equal(m.state.status,'finished');
+});
+test('human snapshots omit future streams and opponent pieces even during opponent turn',async()=>{
+  const m=await Match.create({players:[{type:'search',transitions:8},{type:'human'}]});
+  await m.step();const snapshot=m.snapshot();assert.equal(snapshot.viewer,1);assert.equal(snapshot.human,null);
+  for(const state of [snapshot.state,snapshot.header.initialState,...snapshot.records.map(r=>r.state)]) {
+    assert(!('seeds' in state));assert.equal(state.players[0].current,null);assert.deepEqual(state.players[0].queue,[]);
+    assert.equal(state.players[1].queue.length,5);
+    for(const p of state.players)for(const key of ['bag','pieceRng','garbageRng'])assert(!(key in p));
+  }
+  await m.run();const waiting=m.snapshot();assert.equal(waiting.human.stateHash,hashState(m.state));
+  assert.deepEqual(waiting.human.moves.map(m=>m.id),legalMoves(m.state).map(m=>m.id));
+  assert(!('path' in waiting.human.moves[0]));
+  assert(m.state.players[0].pieceRng);assert(m.header.initialState.seeds);await m.stop();
+});
+test('manual injection into an LLM condition is rejected without a decision or fallback',async()=>{
+  const m=await Match.create({players:[{type:'llm'},{type:'human'}]});const before=hashState(m.state);
+  await assert.rejects(()=>m.step({moveId:'m0000',stateHash:before}),/requires a human/);
+  assert.equal(m.records.length,0);assert.equal(hashState(m.state),before);await m.stop();
+});
+
+test('LLM opponent uses its configured protocol then yields to human input',async()=>{
+  const initialState=createGame({first:1});initialState.remaining=1;
+  const m=await Match.create({initialState,players:[{type:'human'},{type:'llm-preview',model:'preview/gemma-4-31B-it'}]});
+  const move=legalMoves(m.state).find(m=>!m.useHold);
+  await m.step({transport:async(endpoint,body)=>{
+    assert.equal(endpoint,'https://api.ai.sakura.ad.jp');assert.equal(body.model,'preview/gemma-4-31B-it');
+    const obs=JSON.parse(body.messages[1].content);assert.equal(obs.actor,1);assert(!('next' in obs.opponent));
+    return {choices:[{message:{content:JSON.stringify({action:'choose',move:move.id})},finish_reason:'stop'}],usage:{prompt_tokens:100,completion_tokens:10}};
+  }});
+  assert.equal(m.records[0].metrics.calls,1);assert.equal(m.state.active,0);assert(m.snapshot().human);
+  await m.run();assert.equal(m.records.length,1);
+  const human=legalMoves(m.state)[0];await m.step({moveId:human.id,stateHash:hashState(m.state)});
+  assert.equal(m.records[1].metrics.calls,0);await m.stop();
+});
