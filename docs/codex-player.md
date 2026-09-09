@@ -5,7 +5,7 @@
 ## 画面で準備する
 
 1. 自分を「人間（あなた）」、相手を「Codex · このセッション」に設定します。
-2. 必要に応じて「観測・生成・探索の設定」の Codex 試し読みを切り替えます。既定はあり、1判断32遷移です。生成トークン・思考設定・API要求間隔は Codex セッションには適用しません。
+2. Codex 欄のモデル名と推論レベルを実際のセッション設定に合わせます。今回の画面初期値は、ユーザー指定の `GPT-6 Astra` / `High` です。これは記録用で、Codex のモデル設定そのものを変更しません。必要に応じて「観測・生成・探索の設定」の Codex 試し読みを切り替えます。既定はあり、1判断32遷移です。生成トークン・思考設定・API要求間隔は Codex セッションには適用しません。
 3. 対局を作成すると、自分の番なら操作でき、Codex の番なら入力待ちになります。
 4. 実際に対戦する時、この会話で「Codex と対戦開始」と伝えます。画面の「対戦依頼をコピー」には対局IDも含まれます。
 
@@ -45,14 +45,16 @@ npm run agent -- preview RUN_ID --file /tmp/stackingbench-preview.json
 選択が決まったら、**最新のルート観測**の合法手IDを送ります。深いノードでだけ有効なIDを最終手に使いません。
 
 ```json
-{"decisionId":"観測のdecisionId","moveId":"m0012","reason":"短い選択理由","memo":"次の判断への短いメモ","agentModel":"確認できる場合のみモデル名"}
+{"decisionId":"観測のdecisionId","moveId":"m0012","reason":"短い選択理由","memo":"次の判断への短いメモ","agentModel":"GPT-6 Astra","reasoningEffort":"high"}
 ```
 
 ```bash
 npm run agent -- choose RUN_ID --file /tmp/stackingbench-choice.json
 ```
 
-`--file -` で標準入力のJSONも受け付けます。`reason` は最大400文字、`memo` は240文字、`agentModel` は160文字です。モデル名が分からなければ `agentModel` を省略し、推測しません。モデル名は自己申告として記録され、サーバーによる検証済みIDとは扱いません。
+`--file -` で標準入力のJSONも受け付けます。`reason` は最大400文字、`memo` は240文字、`agentModel` は160文字です。モデル名・推論レベルが分かる場合は `agentModel` と `reasoningEffort` に実際の値を指定します。推論レベルは `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max` / `ultra` を受け付け、小文字で保存します。不明なら推測せず省略します。省略した項目は対局開始時の記録用設定を使い、明示的なnullは未記録として扱います。途中でモデルや推論レベルを変更した場合は、その後の各判断で実際の値を送ってください。
+
+開始時の値はheaderの `config.players[].agentModel` / `reasoningEffort`、各手の使用値はdecisionの `execution.model` / `execution.reasoningEffort` に保存します。`execution.provenance` で `user-configured`（対局設定）・`agent-reported`（判断時の申告）・`unknown` を区別します。サーバーの自動検証済み情報ではありません。リプレイは表示中の手までの記録を参照し、保存対局一覧は記録されたモデル・推論レベルの組合せを表示します。以前のログの空欄は推測で補いません。
 
 応答の `acceptedDecisionId` が確定した局面、`decisionId` が次のCodex局面（相手の番・終了ならnull）です。まだ自分の番なら最新の `observe` を取り直して次の1手へ進み、7固定したら `wait` で待ちます。通信結果が不明な場合は現在の状態を取得して確定の有無を確認します。古い `decisionId` の再送は拒否し、次のミノを誤って固定しません。
 

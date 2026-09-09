@@ -1,3 +1,4 @@
+import {agentModel,reasoningEffort} from './agent-identity.js';
 import {performance} from 'node:perf_hooks';
 import {setTimeout as delay} from 'node:timers/promises';
 import {legalMoves,pendingCount} from './engine.js';
@@ -17,7 +18,7 @@ export function playerConfig(value={}) {
     const preview=value.preview??true,transitions=value.transitions??32;
     if(value.observation!==undefined&&value.observation!=='text')throw Error('Only text observations are implemented');
     if(typeof preview!=='boolean'||!Number.isInteger(transitions)||transitions<1||transitions>2048)throw Error('Invalid Codex preview settings');
-    return {type:'codex',observation:'text',input:'codex-session-v1',preview,transitions,model:null};
+    return {type:'codex',observation:'text',input:'codex-session-v1',preview,transitions,model:null,agentModel:agentModel(value.agentModel),reasoningEffort:reasoningEffort(value.reasoningEffort),metadataSource:'user-configured'};
   }
   const provider=value.provider??providerFor(value.model??DEFAULT_MODEL);
   const p={...DEFAULT_PLAYER,...(provider==='sakura'?{responseFormat:'plain',responseParsing:'json-fence-v1'}:{}),...value,provider};

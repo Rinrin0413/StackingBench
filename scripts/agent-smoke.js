@@ -19,7 +19,7 @@ try {
   await page.click('#create');await page.waitForFunction(()=>document.querySelector('#badge').textContent==='CODEX WAIT');
   const id=await page.inputValue('#agent-match-id');assert((await cli(['list'])).some(m=>m.id===id&&m.ready));
   assert(await page.isDisabled('#step'));assert(await page.isDisabled('#run'));assert(await page.isDisabled('[data-input="HD"]'));
-  assert(await page.isDisabled('#model-a'));assert.match(await page.textContent('#recorded-model-a'),/セッション/);
+  assert(await page.isDisabled('#model-a'));assert.match(await page.textContent('#recorded-model-a'),/Codex.*GPT-6 Astra.*High/);
   let last;
   for(let i=0;i<7;i++) {
     const root=await cli(['observe',id]);

@@ -4,10 +4,10 @@ import {mkdtemp,rm,appendFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createGame,legalMoves,applyMove} from '../src/engine.js';
-import {DecisionError} from '../src/players.js';
+import {DecisionError,playerConfig} from '../src/players.js';
 const dir=await mkdtemp(join(tmpdir(),'stackingbench-test-'));
 process.env.STACKINGBENCH_RUNS=dir;
-const {Match,readRun,hashState}=await import('../src/match.js');
+const {Match,readRun,hashState,listRuns}=await import('../src/match.js');
 after(async()=>{await rm(dir,{recursive:true,force:true});delete process.env.STACKINGBENCH_RUNS;});
 
 test('saved match replays each path to identical hashes and final summary',async()=>{
@@ -193,4 +193,32 @@ test('Codex operations serialize and stopping during observation is honored',asy
   const pending=m.agentObserve();await assert.rejects(()=>m.agentObserve(),/already running/);
   await m.stop();await pending;assert.equal(m.state.status,'aborted');assert.equal(m.busy,false);
   assert.equal((await readRun(m.id)).at(-1).status,'aborted');
+});
+
+
+test('Codex model and reasoning metadata persist in headers, decisions, snapshots and run listing',async()=>{
+  const config={type:'codex',preview:false,agentModel:'GPT-6 Astra',reasoningEffort:'High'};
+  const m=await Match.create({maxLocks:2,players:[config,{type:'human'}]});
+  assert.equal(m.header.config.players[0].agentModel,'GPT-6 Astra');assert.equal(m.header.config.players[0].reasoningEffort,'high');
+  let root=await m.agentObserve();assert.equal(root.configuredExecution.model,'GPT-6 Astra');
+  await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id});
+  assert.deepEqual(m.records[0].execution,{model:'GPT-6 Astra',reasoningEffort:'high',provenance:{model:'user-configured',reasoningEffort:'user-configured'}});
+  root=await m.agentObserve();
+  await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,agentModel:'test-model',reasoningEffort:'medium'});
+  const saved=await readRun(m.id),decisions=saved.filter(r=>r.type==='decision');
+  assert.equal(decisions[1].execution.model,'test-model');assert.equal(decisions[1].execution.reasoningEffort,'medium');
+  assert.equal(decisions[1].execution.provenance.reasoningEffort,'agent-reported');
+  assert.equal(saved[0].config.players[0].agentModel,'GPT-6 Astra');
+  assert.deepEqual(m.snapshot().records.map(r=>r.execution),decisions.map(r=>r.execution));
+  const listed=(await listRuns()).find(r=>r.id===m.id);assert.deepEqual(listed.executions[0],decisions.map(r=>r.execution));
+});
+test('Codex identity stays unknown without metadata and rejects invalid reasoning levels',async()=>{
+  assert.equal(playerConfig({type:'codex',model:'unrelated-api-model'}).agentModel,null);
+  assert.equal(playerConfig({type:'codex'}).reasoningEffort,null);
+  assert.throws(()=>playerConfig({type:'codex',reasoningEffort:'invented'}),/reasoningEffort/);
+  const m=await Match.create({maxLocks:1,players:[{type:'codex'},{type:'human'}]});const root=await m.agentObserve();
+  await assert.rejects(()=>m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,reasoningEffort:123}),/reasoningEffort/);
+  assert.equal(m.state.locks,0);
+  await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,agentModel:null,reasoningEffort:null});
+  assert.deepEqual(m.records[0].execution,{model:null,reasoningEffort:null,provenance:{model:'unknown',reasoningEffort:'unknown'}});
 });

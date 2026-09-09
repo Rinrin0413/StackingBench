@@ -2,12 +2,17 @@ import {SHAPES,cells,spawn,motion,fits,spinType} from '/engine.js';
 const $=id=>document.getElementById(id),colors={I:'#72cfdb',J:'#7498ec',L:'#e6b570',O:'#ded479',S:'#85c39a',T:'#b699d5',Z:'#dd8e91',G:'#6c8580'};
 const labels={codex:'Codex · このセッション',human:'人間（あなた）',search:'探索 bot',llm:'LLM · 試し読みなし','llm-preview':'LLM · 試し読みあり'};
 let current=null,liveId=null,frame=0,follow=true,animation=0,noticeTimer,savedRuns=[],draft=null,submitting=false;
-function modelLabel(config) {return config.type==='codex'?'Codex セッション接続（モデルは未検証）':config.type==='human'?'ブラウザ操作':config.type==='search'?'モデル不使用（固定評価）':`${config.provider==='sakura'?'さくらのAI Engine · ':''}${config.model??'モデル名の記録なし'}`;}
+function modelLabel(config,execution) {
+  if(config.type==='codex') {
+    const model=execution?execution.model:config.agentModel,effort=execution?execution.reasoningEffort:config.reasoningEffort;
+    return `Codex · ${model??'モデル未記録'} / ${effort?effort[0].toUpperCase()+effort.slice(1):'推論レベル未記録'}（申告情報）`;
+  }
+  return config.type==='human'?'ブラウザ操作':config.type==='search'?'モデル不使用（固定評価）':`${config.provider==='sakura'?'さくらのAI Engine · ':''}${config.model??'モデル名の記録なし'}`;}
 function savedIdentity() {
   const run=savedRuns.find(r=>r.id===$('saved-runs').value),container=$('saved-models');
   container.replaceChildren();container.hidden=!run;
   for(const [i,p] of (run?.players??[]).entries()) {
-    const line=document.createElement('p');line.textContent=`${i===0?'A':'B'} · ${labels[p.type]} — ${modelLabel(p)}`;container.append(line);
+    const line=document.createElement('p');line.textContent=`${i===0?'A':'B'} · ${labels[p.type]} — ${(run.executions?.[i]?.length?run.executions[i].map(e=>modelLabel(p,e)):[modelLabel(p)]).join(' / ')}`;container.append(line);
   }
 }
 const empty=()=>Array.from({length:24},()=>Array(10).fill('.'));
@@ -40,7 +45,7 @@ function render() {
     $(`turn-${key}`).textContent=active?`残り ${state.remaining} 固定`:'待機';
     $(`name-${key}`).textContent=labels[current?.header.config.players[i].type??$(`type-${key}`).value];
     const config=current?.header.config.players[i];
-    $(`recorded-model-${key}`).textContent=config?modelLabel(config):'対局作成後に使用モデルを表示';
+    $(`recorded-model-${key}`).textContent=config?modelLabel(config,records.slice(0,frame).findLast(r=>r.actor===i&&r.execution)?.execution):'対局作成後に使用モデルを表示';
   }
   $('lock-label').textContent=`${state?.locks??0} / ${state?.rules.maxLocks??280} LOCKS`;
   $('timeline').max=records.length;$('timeline').value=frame;$('frame').textContent=`${frame} / ${records.length}`;
@@ -61,7 +66,7 @@ function render() {
   $('decision-metrics').replaceChildren();
   if(m)for(const text of [`${(m.elapsedMs/1000).toFixed(2)} 秒`,`${m.transitions} 遷移`,`${m.calls} API`,`${m.completionTokens??'不明'} 出力 tokens`]){const span=document.createElement('span');span.textContent=text;$('decision-metrics').append(span);}
   if(Number.isFinite(m?.estimatedCostJpy)){const span=document.createElement('span');span.textContent=`約 ${m.estimatedCostJpy.toFixed(3)} 円（公開レート）`;$('decision-metrics').append(span);}
-  $('json-view').textContent=JSON.stringify(record?{move:record.move,result:state.last,metrics:m,summary:current.summary}:initial??{},null,2);
+  $('json-view').textContent=JSON.stringify(record?{execution:record.execution,move:record.move,result:state.last,metrics:m,summary:current.summary}:initial??{},null,2);
   renderHuman();renderAgent();
 }
 function renderAgent() {
@@ -143,7 +148,7 @@ document.addEventListener('keydown',catchErrors(async e=>{
   if(e.repeat&&!['L','R','D'].includes(op))return;
   await humanInput(op);
 }));
-function player(key) {return {type:$(`type-${key}`).value,preview:$('codex-preview').value==='true',model:$(`model-${key}`).value,observation:$('observation').value,transitions:Number($('transitions').value),maxTokens:Number($('tokens').value),
+function player(key) {return {type:$(`type-${key}`).value,...($(`type-${key}`).value==='codex'?{agentModel:$(`codex-model-${key}`).value,reasoningEffort:$(`codex-effort-${key}`).value}:{}),preview:$('codex-preview').value==='true',model:$(`model-${key}`).value,observation:$('observation').value,transitions:Number($('transitions').value),maxTokens:Number($('tokens').value),
   timeoutMs:Number($('timeout').value)*1000,temperature:Number($('temperature').value),thinking:$('thinking').value,decisionTokens:Number($('decision-tokens').value),maxCalls:Number($('max-calls').value),requestIntervalMs:Number($('request-interval').value)*1000};}
 async function create(parent) {
   current=await api('/api/matches',{players:[player('a'),player('b')],seeds:[Number($('seed-a').value),Number($('seed-b').value)],first:Number($('first').value),maxLocks:Number($('max-locks').value),...(parent?{parent}:{})});
@@ -163,7 +168,7 @@ $('path').onclick=catchErrors(async()=>{
   for(const op of record.move.path){if(token!==animation)return;pos=motion(board,record.move.piece,pos,op);drawBoard(`board-${key}`,board,{piece:record.move.piece,cells:cells(record.move.piece,pos)});await new Promise(r=>setTimeout(r,100));}
   if(token===animation)render();
 });
-async function refresh(){savedRuns=await api('/api/runs');const selected=$('saved-runs').value;$('saved-runs').replaceChildren(new Option('リプレイを選択',''));for(const r of savedRuns){const matchup=r.players.map(p=>['search','human','codex'].includes(p.type)?labels[p.type]:`${p.model??'モデル不明'} (${labels[p.type]})`).join(' vs ');$('saved-runs').append(new Option(`${r.createdAt.slice(5,16).replace('T',' ')} · ${matchup} · ${r.locks}手 · ${r.status}`,r.id));}$('saved-runs').value=selected;savedIdentity();}
+async function refresh(){savedRuns=await api('/api/runs');const selected=$('saved-runs').value;$('saved-runs').replaceChildren(new Option('リプレイを選択',''));for(const r of savedRuns){const matchup=r.players.map((p,i)=>p.type==='codex'?(r.executions?.[i]?.length?r.executions[i].map(e=>modelLabel(p,e)).join(' / '):modelLabel(p)):['search','human'].includes(p.type)?labels[p.type]:`${p.model??'モデル不明'} (${labels[p.type]})`).join(' vs ');$('saved-runs').append(new Option(`${r.createdAt.slice(5,16).replace('T',' ')} · ${matchup} · ${r.locks}手 · ${r.status}`,r.id));}$('saved-runs').value=selected;savedIdentity();}
 $('saved-runs').onchange=savedIdentity;
 $('refresh').onclick=catchErrors(refresh);
 $('open-run').onclick=catchErrors(async()=>{
@@ -179,6 +184,6 @@ $('probe').onclick=catchErrors(async()=>{
     notice(result.ok?`${result.model}: JSON応答を確認しました。${(result.elapsedMs/1000).toFixed(1)}秒。`:result.error??'JSON応答を確認できませんでした');
   } finally {$('probe').disabled=false;}
 });
-for(const key of ['a','b'])$(`type-${key}`).onchange=()=>{const unused=['search','human','codex'].includes($(`type-${key}`).value);$(`model-${key}`).disabled=unused;$(`model-${key}`).parentElement.classList.toggle('dim',unused);render();};
+for(const key of ['a','b'])$(`type-${key}`).onchange=()=>{const unused=['search','human','codex'].includes($(`type-${key}`).value);$(`codex-identity-${key}`).hidden=$(`type-${key}`).value!=='codex';$(`model-${key}`).disabled=unused;$(`model-${key}`).parentElement.classList.toggle('dim',unused);render();};
 await catchErrors(async()=>{const config=await api('/api/config');for(const key of ['a','b']){for(const id of config.models)$(`model-${key}`).append(new Option(`${config.sakuraModels?.includes(id)?'さくら · ':''}${id}`,id));$(`type-${key}`).onchange();}await refresh();const saved=sessionStorage.getItem('stackingbench-live');if(saved){try{current=await api(`/api/matches/${saved}`);liveId=saved;frame=current.records.length;}catch{sessionStorage.removeItem('stackingbench-live');}}render();})();
 setInterval(catchErrors(async()=>{if(!liveId||!current?.busy&&!current?.running&&!(current?.hasAgent&&current.state.status==='playing'))return;const id=liveId,previousCount=current.records.length,wasHuman=!!current.human;const snapshot=await api(`/api/matches/${id}`);if(liveId!==id||submitting||snapshot.records.length<current.records.length)return;current=snapshot;if(follow)frame=current.records.length;render();if(current.human&&follow&&!wasHuman)focusBoard();if(!current.busy&&!current.running&&current.records.length!==previousCount)await refresh();}),1500);

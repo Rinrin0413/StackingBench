@@ -28,7 +28,7 @@ export async function listRuns() {
     const records=await readRun(name.slice(0,-6));
     if(!records[0]) continue;
     const end=records.findLast(r=>r.type==='end');
-    result.push({id:records[0].id,createdAt:records[0].createdAt,players:records[0].config.players,status:end?.status??'incomplete',
+    result.push({id:records[0].id,createdAt:records[0].createdAt,players:records[0].config.players,executions:[0,1].map(actor=>records.filter(r=>r.type==='decision'&&r.actor===actor&&r.execution).map(r=>r.execution).filter((e,i,a)=>a.findIndex(x=>JSON.stringify(x)===JSON.stringify(e))===i)),status:end?.status??'incomplete',
       winner:end?.winner,locks:records.filter(r=>r.type==='decision'&&r.move).length});
   }
   return result;
@@ -58,7 +58,7 @@ export class Match {
     m.state=initial;m.config=config;m.records=[];m.memos=['',''];m.running=false;m.busy=false;m.stopRequested=false;m.ended=false;
     let sourceRevision=null,sourceDirty=null;
     try {sourceRevision=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();sourceDirty=!!execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim();} catch { /* Initial uncommitted workspace. */ }
-    const sourceFiles=['engine.js','observation.js','players.js','match.js','providers.js','agent.js'];
+    const sourceFiles=['engine.js','observation.js','players.js','match.js','providers.js','agent.js','agent-identity.js'];
     const sourceHash=createHash('sha256');for(const file of sourceFiles)sourceHash.update(await readFile(new URL(file,import.meta.url)));
     m.header={type:'header',format:1,id:m.id,createdAt:new Date().toISOString(),config,initialState:clone(initial),initialHash:hashState(initial),
       runtime:process.version,engineVersion:'0.1.0',sourceRevision,sourceDirty,sourceHash:sourceHash.digest('hex')};
