@@ -1,5 +1,7 @@
 # さくらのAI Engine 接続と比較
 
+実行結果と保存対局IDは [実測記録](sakura-validation.md) を参照してください。
+
 対象は `preview/Kimi-K2.6` と `preview/gemma-4-31B-it`。UIまたはCLIでこのIDを選ぶとprovider=sakuraとして `https://api.ai.sakura.ad.jp/v1/chat/completions` に接続します。ゲームルールv1、合法手順序、観測、固定botは変更しません。
 
 ## APIキー
@@ -31,6 +33,8 @@ UIのモデル選択にも両IDを追加。リプレイにモデルIDとprovider
 `--model-a` / `--model-b` で両者別モデルも設定できます。条件比較では同一局面、同じ公開情報、同じ予算を使い、本文・reasoning_content・usage・実際のpreview回数を保存します。HTTP401/429/500やtimeoutは無効で、接続先やプレイヤーの無断置換はありません。
 
 `--request-interval-ms 10000` で同一プロセス・接続先への要求開始間隔を10秒以上にできます。previewと訂正要求にも適用し、別プロセスとは共有しません。HTTP429の自動再試行はしません。既定値は0、使用値は対局設定に保存します。待機時間は `pacingMs` に記録し、`elapsedMs` はこれを含むため、API自体の応答時間は各requestの `elapsedMs` を参照します。10秒は今回の試験値で、公式のレート上限を示すものではありません。
+
+画面では「観測・生成・探索の設定」の「API 要求間隔 (秒)」から変更できます。今回のKimi対局を再試行するなら、思考を無効、出力4096、生成予算16384、最大API往復10、要求間隔10秒を指定します。
 
 ## 確認したAPI仕様と残る検証
 
