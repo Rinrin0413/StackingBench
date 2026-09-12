@@ -6,7 +6,7 @@
 
 ## APIキー
 
-`SAKURA_AI_API_KEY` をNode.jsプロセスの環境変数で設定してください。アカウントトークン全体を使います。既に環境変数を設定したターミナルなら、そのターミナルから `npm start` や以下の検証コマンドを実行できます。別のプロセスで後からexportした環境変数は、実行中サーバーには自動では伝わりません。
+`SAKURA_AI_API_KEY` をNode.jsプロセスの環境変数で設定してください。アカウントトークン全体を使います。既に環境変数を設定したターミナルなら、そのターミナルから `pnpm start` や以下の検証コマンドを実行できます。別のプロセスで後からexportした環境変数は、実行中サーバーには自動では伝わりません。
 
 代わりに `.env.example` を参考に、Git対象外の `.env` に保存できます。起動時に読み、既にある環境変数を優先します。キーを変更したときはサーバーを再起動します。キーをコマンド引数・画面・対局設定・ログに書き込みません。認証ヘッダーは公式HTTPSの接続先にのみ付け、リダイレクトを追いません。
 
@@ -16,16 +16,16 @@
 
 ```bash
 # 1回ずつ短い応答で確認。対局の成績には含めない
-npm run probe -- preview/Kimi-K2.6
-npm run probe -- preview/gemma-4-31B-it
+pnpm run probe -- preview/Kimi-K2.6
+pnpm run probe -- preview/gemma-4-31B-it
 
 # 同じ保存局面を3条件で各1判断
-npm run compare -- --model preview/Kimi-K2.6 --run RUN_ID --index 14 --max-tokens 4096 --decision-tokens 16384 --max-calls 10 --thinking off --request-interval-ms 10000
-npm run compare -- --model preview/gemma-4-31B-it --run RUN_ID --index 14 --max-tokens 4096 --decision-tokens 16384 --max-calls 10
+pnpm run compare -- --model preview/Kimi-K2.6 --run RUN_ID --index 14 --max-tokens 4096 --decision-tokens 16384 --max-calls 10 --thinking off --request-interval-ms 10000
+pnpm run compare -- --model preview/gemma-4-31B-it --run RUN_ID --index 14 --max-tokens 4096 --decision-tokens 16384 --max-calls 10
 
 # 最大56固定の対戦。短すぎる14固定で攻防を判断しない
-npm run bench -- --model preview/Kimi-K2.6 --a llm-preview --b search --max-locks 56 --seeds 101 --max-tokens 4096 --decision-tokens 16384 --max-calls 10 --thinking off --request-interval-ms 10000
-npm run bench -- --model preview/gemma-4-31B-it --a llm-preview --b search --max-locks 56 --seeds 101 --max-tokens 4096 --decision-tokens 16384 --max-calls 10
+pnpm run bench -- --model preview/Kimi-K2.6 --a llm-preview --b search --max-locks 56 --seeds 101 --max-tokens 4096 --decision-tokens 16384 --max-calls 10 --thinking off --request-interval-ms 10000
+pnpm run bench -- --model preview/gemma-4-31B-it --a llm-preview --b search --max-locks 56 --seeds 101 --max-tokens 4096 --decision-tokens 16384 --max-calls 10
 ```
 
 UIのモデル選択にも両IDを追加。リプレイにモデルIDとproviderを表示します。「LLM 接続確認」は選択モデルへの短い生成要求を1回送信します。Aが探索botでBがLLMならB、それ以外はAの選択モデルを使います。以前のモデル一覧取得だけの確認から変更しました。

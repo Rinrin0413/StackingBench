@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 
 const [command,id,...args]=process.argv.slice(2);
-const usage='Usage: npm run agent -- list | observe ID | wait ID [--after DECISION_ID] [--timeout-ms 50000] | preview ID --file JSON_FILE | choose ID --file JSON_FILE (use --file - for stdin)';
+const usage='Usage: pnpm run agent -- list | observe ID | wait ID [--after DECISION_ID] [--timeout-ms 50000] | preview ID --file JSON_FILE | choose ID --file JSON_FILE (use --file - for stdin)';
 try {
   const origin=new URL(process.env.STACKINGBENCH_URL??'http://127.0.0.1:3210');
   if(origin.protocol!=='http:'||!['localhost','127.0.0.1'].includes(origin.hostname)||origin.username||origin.password||origin.pathname!=='/'||origin.search||origin.hash)throw Error('STACKINGBENCH_URL must be a local HTTP origin');

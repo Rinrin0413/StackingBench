@@ -17,13 +17,13 @@
 
 ```bash
 # サーバー上で読み込まれている Codex 対局を確認（系列・盤面は含まない）
-npm run agent -- list
+pnpm run agent -- list
 
 # 指定対局の公開盤面、合法手、ルール説明、前回メモを取得
-npm run agent -- observe RUN_ID
+pnpm run agent -- observe RUN_ID
 
 # 相手の番なら最大50秒だけ待ち、自分の番で観測を返す
-npm run agent -- wait RUN_ID --after PREVIOUS_DECISION_ID --timeout-ms 50000
+pnpm run agent -- wait RUN_ID --after PREVIOUS_DECISION_ID --timeout-ms 50000
 ```
 
 実行先は既定で `http://127.0.0.1:3210`。開発用の別ポートだけ使う場合は `STACKINGBENCH_URL=http://127.0.0.1:3211`。専用CLIはローカルHTTP以外を拒否し、リダイレクトを追いません。
@@ -37,7 +37,7 @@ npm run agent -- wait RUN_ID --after PREVIOUS_DECISION_ID --timeout-ms 50000
 ```
 
 ```bash
-npm run agent -- preview RUN_ID --file /tmp/stackingbench-preview.json
+pnpm run agent -- preview RUN_ID --file /tmp/stackingbench-preview.json
 ```
 
 `node` は `root` または以前に返されたノードID。深さ、未知NEXT、未来のおじゃま穴の境界は既存の試し読みと同じです。`requestId` が同じで内容も同じなら保存済みの結果を返し、予算を再消費しません。別の試し読みでは新しいIDを使います。省略時はCLIがUUIDを生成しますが、通信失敗後に同じ要求を再送する場合はファイル側にIDを指定してください。観測を再取得しても予算はリセットされません。
@@ -49,7 +49,7 @@ npm run agent -- preview RUN_ID --file /tmp/stackingbench-preview.json
 ```
 
 ```bash
-npm run agent -- choose RUN_ID --file /tmp/stackingbench-choice.json
+pnpm run agent -- choose RUN_ID --file /tmp/stackingbench-choice.json
 ```
 
 `--file -` で標準入力のJSONも受け付けます。`reason` は最大400文字、`memo` は240文字、`agentModel` は160文字です。モデル名・推論レベルが分かる場合は `agentModel` と `reasoningEffort` に実際の値を指定します。推論レベルは `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max` / `ultra` を受け付け、小文字で保存します。不明なら推測せず省略します。省略した項目は対局開始時の記録用設定を使い、明示的なnullは未記録として扱います。途中でモデルや推論レベルを変更した場合は、その後の各判断で実際の値を送ってください。
@@ -70,10 +70,10 @@ npm run agent -- choose RUN_ID --file /tmp/stackingbench-choice.json
 
 ## 開発時の確認
 
-`npm test` と `npm run check` に加えて、`scripts/agent-smoke.js` は Playwright で専用CLI・試し読み再送・待機・7固定交代・画面の自動更新・保存リプレイを検証します。モデルを呼ばず、固定の検証用選択を送ります。実対局のログと混ぜないため別サーバーを使います。
+`pnpm test` と `pnpm run check` に加えて、`scripts/agent-smoke.js` は Playwright で専用CLI・試し読み再送・待機・7固定交代・画面の自動更新・保存リプレイを検証します。モデルを呼ばず、固定の検証用選択を送ります。実対局のログと混ぜないため別サーバーを使います。
 
 ```bash
-PORT=3211 STACKINGBENCH_RUNS=/tmp/stackingbench-agent-validation npm start
+PORT=3211 STACKINGBENCH_RUNS=/tmp/stackingbench-agent-validation pnpm start
 # 別のターミナル。必要なら PLAYWRIGHT_MODULE / CHROME_PATH を指定
 APP_URL=http://127.0.0.1:3211 node scripts/agent-smoke.js
 ```

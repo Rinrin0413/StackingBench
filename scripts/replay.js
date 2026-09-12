@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readRun,hashState} from '../src/match.js';
 import {applyMove} from '../src/engine.js';
-const id=process.argv[2];if(!id) throw Error('Usage: npm run replay -- RUN_ID');
+const id=process.argv[2];if(!id) throw Error('Usage: pnpm run replay -- RUN_ID');
 const records=await readRun(id);let state=records[0].initialState,count=0;
 assert.equal(hashState(state),records[0].initialHash);
 for(const record of records.filter(r=>r.type==='decision')) {

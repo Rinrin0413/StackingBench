@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@10.6.5",
   "engines": { "node": ">=22.8" },
   "scripts": {
     "start": "node src/server.js",

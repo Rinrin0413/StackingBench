@@ -9,7 +9,7 @@ LLM の盤面理解、先読み、攻防判断を観察するローカル対戦�
 Node.js 22.8以上（検証環境は24.14）。外部パッケージのインストールは不要です。
 
 ```bash
-npm start
+pnpm start
 ```
 
 [http://127.0.0.1:3210](http://127.0.0.1:3210) を開き、プレイヤーを選び「新しい対局を作成」→「1手進める」または「自動対戦」。初期状態は探索 bot 同士なので LLM サーバーなしでも使えます。
@@ -17,7 +17,7 @@ npm start
 llama.cpp の接続先は `http://localhost:8082`。変更する場合:
 
 ```bash
-LLM_BASE_URL=http://localhost:8082 PORT=3210 npm start
+LLM_BASE_URL=http://localhost:8082 PORT=3210 pnpm start
 ```
 
 他のアプリが3000番を使用していたため、初期ポートは3210です。サーバーは127.0.0.1にだけバインドします。モデルを指定した生成要求でロードする構成を実機確認済みです。モデル一覧の取得だけでは生成能力を確認できません。
@@ -67,26 +67,26 @@ LLM_BASE_URL=http://localhost:8082 PORT=3210 npm start
 
 ```bash
 # モデル一覧、短い構造化応答、思考出力の保存
-npm run probe -- Gemma-4-E2B_UD_Q4_K_XL_fast
+pnpm run probe -- Gemma-4-E2B_UD_Q4_K_XL_fast
 
 # 探索 bot 同士、3シード、先後交換（6対局）
-npm run bench -- --seeds 101,202,303 --swap
+pnpm run bench -- --seeds 101,202,303 --swap
 
 # 軽量モデルの短い接続確認（強さの評価には使用しない）
-npm run bench -- --a llm-preview --b search --model Gemma-4-E2B_UD_Q4_K_XL_fast --max-locks 14
+pnpm run bench -- --a llm-preview --b search --model Gemma-4-E2B_UD_Q4_K_XL_fast --max-locks 14
 
 # 通常モデル、思考無効を明示した別条件
-npm run bench -- --a llm-preview --b llm --model Qwen3.6-35B-A3B_UD-Q4_K_XL_128K-ctx_fast --thinking off --max-locks 14
+pnpm run bench -- --a llm-preview --b llm --model Qwen3.6-35B-A3B_UD-Q4_K_XL_128K-ctx_fast --thinking off --max-locks 14
 
 # 空の同一局面を3条件で各1判断（対局成績には含めない）
-npm run compare -- --model Qwen3.6-35B-A3B_UD-Q4_K_XL_128K-ctx_fast --thinking off
+pnpm run compare -- --model Qwen3.6-35B-A3B_UD-Q4_K_XL_128K-ctx_fast --thinking off
 
 # 保存した局面を使う（RUN_ID は拡張子なし、index=0 は開始時）
-npm run compare -- --run RUN_ID --index 14 --model MODEL_ID --thinking off
-npm run replay -- RUN_ID
+pnpm run compare -- --run RUN_ID --index 14 --model MODEL_ID --thinking off
+pnpm run replay -- RUN_ID
 
-npm test
-npm run check
+pnpm test
+pnpm run check
 ```
 
 生成上限2048は**応答ごと**、全判断の生成予算8192、最大34往復、応答待ち120秒が初期値です。試し読み予算は1判断32遷移。UI の詳細設定で変更できます。CLI は `--max-tokens` / `--transitions` も利用できます。`--thinking off` は `chat_template_kwargs.enable_thinking=false` を送ります。既定設定と混ぜず、別条件として集計してください。
