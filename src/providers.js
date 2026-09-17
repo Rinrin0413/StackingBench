@@ -4,16 +4,17 @@ import {homedir} from 'node:os';
 import {join} from 'node:path';
 import {parseEnv} from 'node:util';
 try {process.loadEnvFile();} catch(e) {if(e.code!=='ENOENT')throw e;}
-export function accountKeyFromConfig(contents) {
-  const line=contents.split(/\r?\n/).find(line=>/^\s*SAKURA_AI_API_KEY\s*=/.test(line));
-  const value=line?parseEnv(line).SAKURA_AI_API_KEY?.trim():null;
-  if(value?.includes('$'))throw Error('SAKURA_AI_API_KEY in environment.d must be a literal value; variable expansion is not supported');
+export function accountKeyFromConfig(contents,name='SAKURA_AI_API_KEY') {
+  if(!['SAKURA_AI_API_KEY','TYPESAFE_API_KEY'].includes(name))throw Error('Unsupported credential name');
+  const line=contents.split(/\r?\n/).find(line=>new RegExp(`^\\s*${name}\\s*=`).test(line));
+  const value=line?parseEnv(line)[name]?.trim():null;
+  if(value?.includes('$'))throw Error(`${name} in environment.d must be a literal value; variable expansion is not supported`);
   return value??null;
 }
-if(!process.env.SAKURA_AI_API_KEY?.trim()) {
+for(const name of ['SAKURA_AI_API_KEY','TYPESAFE_API_KEY']) if(!process.env[name]?.trim()) {
   try {
-    const key=accountKeyFromConfig(readFileSync(join(homedir(),'.config/environment.d/envvars.conf'),'utf8'));
-    if(key)process.env.SAKURA_AI_API_KEY=key;
+    const key=accountKeyFromConfig(readFileSync(join(homedir(),'.config/environment.d/envvars.conf'),'utf8'),name);
+    if(key)process.env[name]=key;
   } catch(e) {if(e.code!=='ENOENT')throw e;}
 }
 
@@ -37,7 +38,7 @@ export function authHeaders(base) {
   }
   if(endpointFor({provider:'llamacpp'},base)===TYPESAFE_BASE) {
     const key=process.env.TYPESAFE_API_KEY?.trim();
-    if(!key)throw Object.assign(new Error('TYPESAFE_API_KEY is not configured. Set the process environment or .env and restart.'),{code:'missing-api-key'});
+    if(!key)throw Object.assign(new Error('TYPESAFE_API_KEY is not configured. Set the process environment, .env, or ~/.config/environment.d/envvars.conf and restart.'),{code:'missing-api-key'});
     headers.Authorization=`Bearer ${key}`;
   }
   return headers;

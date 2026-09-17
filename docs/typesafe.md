@@ -1,6 +1,6 @@
 # TypeSafe Jev 接続
 
-環境変数 `TYPESAFE_API_KEY` をサーバープロセスに渡すか、ローカル `.env` に設定して `pnpm start` で起動する。キーはブラウザ・対局ログへ渡さない。
+環境変数 `TYPESAFE_API_KEY` をサーバープロセスに渡すか、ローカル `.env` または `~/.config/environment.d/envvars.conf` に設定して `pnpm start` で起動する。キーはブラウザ・対局ログへ渡さない。
 
 画面で一方を「人間（あなた）」、他方を「LLM · 試し読みなし」、モデルを「TypeSafe · Jev（試し読みなし） · jev-latest」にして対局を作成する。「接続確認」も Jev のネイティブ API に対応する。
 
@@ -15,3 +15,5 @@
 現行 API に生成用 temperature、max_tokens、思考設定はないため送信しない。共通 UI のこれらの設定は Jev には適用せず、保存設定では temperature / maxTokens / decisionTokens を null、thinking を server-default とし、tokenBudgetPolicy にプロバイダー管理であることを記録する。生成トークン上限を保証する条件ではない。`jev-latest` は可変エイリアスなので応答のモデル名も保存する。
 
 自動テストは通信をモックし、要求形式、全候補の保持、公開情報境界、認証・秘密情報除去、使用量、不正応答、通信失敗を検証する。実 API の疎通や対戦強度を示すものではない。
+
+設定の優先順位はプロセス環境、`.env`、`~/.config/environment.d/envvars.conf`。environment.d からは対象のキーだけをリテラルとして読み込み、シェルとして実行しない。変更後はサーバーを再起動する。

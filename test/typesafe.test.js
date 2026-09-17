@@ -67,3 +67,17 @@ test('Jev probe uses native API and records the response separately',async t=>{
   assert.equal(result.ok,true);const record=JSON.parse(await readFile(`${dir}/${result.file}`,'utf8'));
   assert.equal(record.response.answers.move.choice,'ok');
 });
+test('environment.d loads each provider key by its own name without replacing process credentials',async()=>{
+  const {mkdtemp,mkdir,writeFile,rm}=await import('node:fs/promises');
+  const {execFileSync}=await import('node:child_process');
+  const dir=await mkdtemp('/tmp/stackingbench-env-');
+  try {
+    await mkdir(`${dir}/.config/environment.d`,{recursive:true});
+    await writeFile(`${dir}/.config/environment.d/envvars.conf`,'SAKURA_AI_API_KEY=sakura-fixture\nTYPESAFE_API_KEY=jev-fixture\n');
+    const env={...process.env,HOME:dir};delete env.TYPESAFE_API_KEY;delete env.SAKURA_AI_API_KEY;
+    const script=`await import(${JSON.stringify(new URL('../src/providers.js',import.meta.url).href)});console.log(JSON.stringify([process.env.SAKURA_AI_API_KEY,process.env.TYPESAFE_API_KEY]));`;
+    const run=()=>JSON.parse(execFileSync(process.execPath,['--input-type=module','-e',script],{cwd:dir,env,encoding:'utf8'}));
+    assert.deepEqual(run(),['sakura-fixture','jev-fixture']);
+    env.TYPESAFE_API_KEY='process-fixture';assert.deepEqual(run(),['sakura-fixture','process-fixture']);
+  } finally {await rm(dir,{recursive:true,force:true});}
+});
