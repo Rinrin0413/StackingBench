@@ -10,7 +10,7 @@ function modelLabel(config,execution) {
     if(config.type==='agy')return `Antigravity CLI (agy) · ${model??'モデル未記録'}（申告情報）`;
     return `Codex · ${model??'モデル未記録'} / ${effort?effort[0].toUpperCase()+effort.slice(1):'推論レベル未記録'}（申告情報）`;
   }
-  return config.type==='human'?'ブラウザ操作':config.type==='search'?'モデル不使用（固定評価）':`${config.provider==='sakura'?'さくらのAI Engine · ':''}${config.model??'モデル名の記録なし'}`;}
+  return config.type==='human'?'ブラウザ操作':config.type==='search'?'モデル不使用（固定評価）':`${config.provider==='typesafe'?'TypeSafe · ':config.provider==='sakura'?'さくらのAI Engine · ':''}${config.model??'モデル名の記録なし'}`;}
 function savedIdentity() {
   const run=savedRuns.find(r=>r.id===$('saved-runs').value),container=$('saved-models');
   container.replaceChildren();container.hidden=!run;
@@ -190,5 +190,16 @@ $('probe').onclick=catchErrors(async()=>{
   } finally {$('probe').disabled=false;}
 });
 for(const key of ['a','b'])$(`type-${key}`).onchange=()=>{const unused=['search','human','codex','agy'].includes($(`type-${key}`).value);$(`agy-identity-${key}`).hidden=$(`type-${key}`).value!=='agy';$(`codex-identity-${key}`).hidden=$(`type-${key}`).value!=='codex';$(`model-${key}`).parentElement.hidden=$(`type-${key}`).value==='agy';$(`model-${key}`).disabled=unused;$(`model-${key}`).parentElement.classList.toggle('dim',unused);render();};
-await catchErrors(async()=>{const config=await api('/api/config');for(const key of ['a','b']){for(const id of config.models)$(`model-${key}`).append(new Option(`${config.sakuraModels?.includes(id)?'さくら · ':''}${id}`,id));$(`type-${key}`).onchange();}await refresh();const saved=sessionStorage.getItem('stackingbench-live');if(saved){try{current=await api(`/api/matches/${saved}`);liveId=saved;frame=current.records.length;}catch{sessionStorage.removeItem('stackingbench-live');}}render();})();
+for(const key of ['a','b']) {
+  const updateType=$(`type-${key}`).onchange;
+  const update=()=>{
+    const jev=$(`model-${key}`).value==='jev-latest';
+    const preview=Array.from($(`type-${key}`).options).find(o=>o.value==='llm-preview');
+    preview.disabled=jev;
+    if(jev&&$(`type-${key}`).value==='llm-preview')$(`type-${key}`).value='llm';
+    updateType();
+  };
+  $(`model-${key}`).onchange=update;$(`type-${key}`).onchange=update;
+}
+await catchErrors(async()=>{const config=await api('/api/config');for(const key of ['a','b']){for(const id of config.models)$(`model-${key}`).append(new Option(`${id==='jev-latest'?'TypeSafe · Jev（試し読みなし） · ':config.sakuraModels?.includes(id)?'さくら · ':''}${id}`,id));$(`type-${key}`).onchange();}await refresh();const saved=sessionStorage.getItem('stackingbench-live');if(saved){try{current=await api(`/api/matches/${saved}`);liveId=saved;frame=current.records.length;}catch{sessionStorage.removeItem('stackingbench-live');}}render();})();
 setInterval(catchErrors(async()=>{if(!liveId||!current?.busy&&!current?.running&&!(current?.hasAgent&&current.state.status==='playing'))return;const id=liveId,previousCount=current.records.length,wasHuman=!!current.human;const snapshot=await api(`/api/matches/${id}`);if(liveId!==id||submitting||snapshot.records.length<current.records.length)return;current=snapshot;if(follow)frame=current.records.length;render();if(current.human&&follow&&!wasHuman)focusBoard();if(!current.busy&&!current.running&&current.records.length!==previousCount)await refresh();}),1500);

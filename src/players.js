@@ -3,7 +3,7 @@ import {performance} from 'node:perf_hooks';
 import {setTimeout as delay} from 'node:timers/promises';
 import {legalMoves,pendingCount} from './engine.js';
 import {observe,PreviewSession} from './observation.js';
-import {providerFor,endpointFor,authHeaders,redactSecret,estimatedCost,thinkingParameters} from './providers.js';
+import {TYPESAFE_BASE,TYPESAFE_MODEL,providerFor,endpointFor,authHeaders,redactSecret,estimatedCost,thinkingParameters} from './providers.js';
 
 export const DEFAULT_MODEL='Qwen3.6-35B-A3B_UD-Q4_K_XL_128K-ctx_fast';
 export const QUICK_MODEL='Gemma-4-E2B_UD_Q4_K_XL_fast';
@@ -21,8 +21,9 @@ export function playerConfig(value={}) {
     return {type:value.type,observation:'text',input:`${value.type}-session-v1`,preview,transitions,model:null,agentModel:agentModel(value.agentModel===undefined&&value.type==='agy'?'Gemini':value.agentModel),reasoningEffort:value.type==='agy'?null:reasoningEffort(value.reasoningEffort),metadataSource:'user-configured'};
   }
   const provider=value.provider??providerFor(value.model??DEFAULT_MODEL);
+  if(provider==='typesafe')value={...value,responseFormat:'schema',temperature:0.2,maxTokens:2048,decisionTokens:8192};
   const p={...DEFAULT_PLAYER,...(provider==='sakura'?{responseFormat:'plain',responseParsing:'json-fence-v1'}:{}),...value,provider};
-  if(!['llamacpp','sakura'].includes(provider))throw Error('Unknown provider');
+  if(!['llamacpp','sakura','typesafe'].includes(provider))throw Error('Unknown provider');
   if(provider==='sakura'&&p.responseFormat!=='plain')throw Error('Sakura structured output is unverified; use responseFormat=plain');
   if(!['strict','json-fence-v1'].includes(p.responseParsing))throw Error('Unknown response parser');
   if(!['search','llm','llm-preview'].includes(p.type)) throw Error('Unknown player type');
@@ -33,6 +34,12 @@ export function playerConfig(value={}) {
   if(typeof p.model!=='string'||!p.model.length||p.model.length>300) throw Error('Invalid model');
   if(!Number.isFinite(p.temperature)||p.temperature<0||p.temperature>2) throw Error('Invalid temperature');
   if(!['schema','json','plain'].includes(p.responseFormat)||!['server-default','off'].includes(p.thinking)) throw Error('Invalid generation setting');
+  if(provider==='typesafe') {
+    if(p.model!==TYPESAFE_MODEL)throw Error('Unsupported TypeSafe model');
+    if(p.type!=='llm')throw Error('TypeSafe Jev supports llm (no preview) only');
+    Object.assign(p,{responseFormat:'choice',responseParsing:'strict',thinking:'server-default',temperature:null,maxTokens:null,decisionTokens:null,
+      decisionProtocol:'typesafe-choice-v1',tokenBudgetPolicy:'provider-managed; no generation token limit supported'});
+  }
   return p;
 }
 export function evaluate(state,actor,result) {
@@ -87,7 +94,9 @@ export function parseAction(content,mode='strict') {
 export const ACTION_SCHEMA={type:'object',properties:{action:{type:'string',enum:['choose','preview']},move:{type:'string'},node:{type:'string'},memo:{type:'string'},reason:{type:'string'}},required:['action','move'],additionalProperties:false};
 export function systemPrompt(config,rules) {
   const session=isAgentPlayer(config.type),preview=config.type==='llm-preview'||session&&config.preview;
-  const chooseContract=session
+  const chooseContract=config.provider==='typesafe'
+    ? 'Select the best root legal move through the supplied Choice criteria. Prioritize survival, avoid holes, and build line clears and attacks using visible NEXT.'
+    : session
     ? 'Use the agent choose command with a JSON file: {"decisionId":"current decisionId","moveId":"root move ID","memo":"optional short plan for next decision (max 240 characters)","reason":"optional brief explanation (max 400 characters)"}.'
     : 'Return one JSON object: {"action":"choose","move":"root move ID","memo":"optional short plan for next decision (max 240 characters)","reason":"optional brief explanation (max 400 characters)"}.';
   const previewContract=session
@@ -95,13 +104,24 @@ export function systemPrompt(config,rules) {
     : 'You may first request the preview tool using {"action":"preview","node":"root or prior node ID","move":"ID from that node"}.';
   return `You are a player in StackingBench, a turn-based falling-block duel. Win by making the opponent top out. Each player locks ${rules.locksPerTurn} pieces then yields. One decision locks one piece. HOLD does not consume a lock. SRS paths and game outcomes are computed by the engine. Coordinates and every board row are supplied in the observation. Opponent NEXT and all future garbage holes are private.\nRules: ${JSON.stringify(rules)}\nAttack arrays are indexed by cleared lines. A difficult clear is four lines or a line-clearing T-spin; repeated difficult clears add b2bBonus. A zero-line lock preserves B2B; a normal 1-3 line clear breaks it. REN starts at -1, increments on clear and resets on zero lines. Perfect clear adds perfectClear. Attack cancels your pending garbage FIFO, then sends the remainder. A zero-line lock raises all remaining pending garbage with unknown holes. After clearing and raising, cells in the first hiddenRows=4 rows lose. A blocked spawn also loses. At maxLocks the game draws.\nChoose only an ID from root legalMoves. Candidate spin is the engine's pre-clear classification; no candidate is ranked. ${chooseContract} Explanations are self-reports, not proof of internal reasoning. Your previous memo and last outcome appear in each fresh decision.\n${preview?`${previewContract} Tool replies contain a hypothetical observation and local legalMoves. A boundary stops expansion. Preview budget: ${config.transitions} state transitions. Final choose must name a ROOT move, never a deeper node's move. You need not use all previews.`:'No preview tools are available. Select directly from root legalMoves.'}`;
 }
+export function typesafeInstructions(rules) {
+  return systemPrompt({type:'llm',provider:'typesafe'},rules)+' Read the public state in `observation` and candidates in `observation.legalMoves`.';
+}
+export function validateTypeSafeChoice(answer,ids) {
+  if(answer?.type!=='choice'||typeof answer.choice!=='string')throw responseError('invalid-response','Expected a TypeSafe Choice answer');
+  if(!ids.includes(answer.choice))throw responseError('illegal-move','Unknown root move ID');
+  const probs=answer.probabilities,valid=p=>Number.isFinite(p)&&p>=0&&p<=1;
+  if(!valid(answer.confidence)||!probs||typeof probs!=='object'||Array.isArray(probs)||Object.keys(probs).length!==ids.length||
+    !ids.every(id=>Object.hasOwn(probs,id)&&valid(probs[id]))||Math.abs(Object.values(probs).reduce((a,b)=>a+b,0)-1)>0.01||
+    ids.some(id=>probs[id]>probs[answer.choice]+1e-6))throw responseError('invalid-response','Invalid TypeSafe probability distribution');
+}
 export async function completion(baseUrl,body,timeoutMs) {
   let response,raw;
   const signal=AbortSignal.timeout(timeoutMs);
   let headers;
   try {headers=authHeaders(baseUrl);} catch(e) {throw new DecisionError(e.code??'configuration',e.message);}
   try {
-    response=await fetch(`${endpointFor({provider:'llamacpp'},baseUrl)}/v1/chat/completions`,{method:'POST',headers,body:JSON.stringify(body),signal,redirect:'error'});
+    response=await fetch(`${endpointFor({provider:'llamacpp'},baseUrl)}/v1/${endpointFor({provider:'llamacpp'},baseUrl)===TYPESAFE_BASE?'systemone':'chat/completions'}`,{method:'POST',headers,body:JSON.stringify(body),signal,redirect:'error'});
     raw=redactSecret(await response.text());
   }
   catch(e) {throw new DecisionError(signal.aborted?'timeout':'connection',redactSecret(e.message));}
@@ -119,6 +139,7 @@ async function paceRequest(endpoint,interval) {
 export async function llmDecision(game,config,{baseUrl='http://localhost:8082',memo='',transport=completion}={}) {
   baseUrl=endpointFor(config,baseUrl);
   const start=performance.now(),moves=legalMoves(game),session=config.type==='llm-preview'?new PreviewSession(game,config.transitions):null;
+  const typesafe=config.provider==='typesafe';
   const messages=[{role:'system',content:systemPrompt(config,game.rules)},{role:'user',content:JSON.stringify(observe(game,moves,memo))}];
   const trace={requests:[],previews:[]};
   const metrics={elapsedMs:0,pacingMs:0,transitions:0,calls:0,promptTokens:0,completionTokens:0,usageMissing:0,invalidResponses:0,cost:null};
@@ -126,11 +147,14 @@ export async function llmDecision(game,config,{baseUrl='http://localhost:8082',m
   const finish=()=>{metrics.elapsedMs=performance.now()-start;metrics.transitions=session?.used??0;metrics.estimatedCostJpy=config.provider==='sakura'?estimatedCost(config.model,metrics.promptTokens,metrics.completionTokens):null;trace.previews=session?.history??[];};
   try {
     for(let call=0;call<config.maxCalls;call++) {
-      const available=config.decisionTokens-spent;
+      const available=typesafe?Infinity:config.decisionTokens-spent;
       if(available<32) throw new DecisionError('token-budget','Decision generation budget exhausted','forfeit');
-      const body={model:config.model,messages:structuredClone(messages),temperature:config.temperature,max_tokens:Math.min(config.maxTokens,available),stream:false};
+      let body={model:config.model,messages:structuredClone(messages),temperature:config.temperature,max_tokens:Math.min(config.maxTokens,available),stream:false};
       if(config.responseFormat!=='plain') body.response_format=config.responseFormat==='json'?{type:'json_object'}:{type:'json_object',schema:ACTION_SCHEMA};
       Object.assign(body,thinkingParameters(config));
+      if(typesafe)body={model:config.model,state:{rules:game.rules,observation:observe(game,moves,memo)},questions:{move:{type:'choice',
+        instructions:typesafeInstructions(game.rules)+(errors?' Previous response was invalid. Select an option from the supplied criteria.':''),
+        criteria:Object.fromEntries(moves.map(m=>[m.id,`Execute the legal placement with id ${m.id} in observation.legalMoves.`]))}}};
       const pacingMs=await paceRequest(baseUrl,config.requestIntervalMs);
       metrics.pacingMs+=pacingMs;
       const record={request:body,provider:config.provider??'llamacpp',endpoint:baseUrl,pacingMs,startedAt:new Date().toISOString()}; trace.requests.push(record);metrics.calls++;
@@ -138,15 +162,16 @@ export async function llmDecision(game,config,{baseUrl='http://localhost:8082',m
       try { data=await transport(baseUrl,body,config.timeoutMs);record.response=data; }
       catch(e) {record.error={code:e.code??'connection',message:e.message,detail:e.detail};metrics.usageMissing++;metrics.promptTokens=null;metrics.completionTokens=null;throw e;}
       finally {record.elapsedMs=performance.now()-callStart;}
-      const usage=data.usage,knownUsage=Number.isFinite(usage?.completion_tokens)&&Number.isFinite(usage?.prompt_tokens);
+      const usage=typesafe?{prompt_tokens:data.usage?.input_tokens,completion_tokens:data.usage?.output_tokens}:data.usage,knownUsage=Number.isFinite(usage?.completion_tokens)&&Number.isFinite(usage?.prompt_tokens);
       if(knownUsage) {
         if(metrics.completionTokens!==null) metrics.completionTokens+=usage.completion_tokens;
         if(metrics.promptTokens!==null) metrics.promptTokens+=usage.prompt_tokens;
       } else {metrics.usageMissing++;metrics.promptTokens=null;metrics.completionTokens=null;}
-      spent+=Number.isFinite(usage?.completion_tokens)?usage.completion_tokens:body.max_tokens;
-      const choice=data.choices?.[0],content=choice?.message?.content;
+      if(!typesafe)spent+=Number.isFinite(usage?.completion_tokens)?usage.completion_tokens:body.max_tokens;
+      const choice=data.choices?.[0],content=typesafe?JSON.stringify({action:'choose',move:data.answers?.move?.choice}):choice?.message?.content;
       messages.push({role:'assistant',content:typeof content==='string'?content:''});
       try {
+        if(typesafe)validateTypeSafeChoice(data.answers?.move,moves.map(m=>m.id));
         if(choice?.finish_reason==='length') throw responseError('output-truncated','Output was truncated; produce a shorter valid JSON response');
         if(typeof content!=='string') throw Error('Missing message.content');
         const parsed=parseAction(content,config.responseParsing);

@@ -19,9 +19,11 @@ if(!process.env.SAKURA_AI_API_KEY?.trim()) {
 
 export const SAKURA_BASE='https://api.ai.sakura.ad.jp';
 export const SAKURA_MODELS=['preview/Kimi-K2.6','preview/gemma-4-31B-it'];
-export const providerFor=model=>SAKURA_MODELS.includes(model)?'sakura':'llamacpp';
+export const TYPESAFE_BASE='https://api.typesafe.ai';
+export const TYPESAFE_MODEL='jev-latest';
+export const providerFor=model=>model===TYPESAFE_MODEL?'typesafe':SAKURA_MODELS.includes(model)?'sakura':'llamacpp';
 export function endpointFor(config,localBase=process.env.LLM_BASE_URL??'http://localhost:8082') {
-  const value=config.provider==='sakura'?SAKURA_BASE:localBase;
+  const value=config.provider==='typesafe'?TYPESAFE_BASE:config.provider==='sakura'?SAKURA_BASE:localBase;
   const url=new URL(value);
   if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash) throw Error('Endpoint must not contain credentials, query parameters or fragments');
   return url.href.replace(/\/$/,'').replace(/\/v1$/,'');
@@ -33,9 +35,16 @@ export function authHeaders(base) {
     if(!key)throw Object.assign(new Error('SAKURA_AI_API_KEY is not configured. Set the process environment, .env, or ~/.config/environment.d/envvars.conf and restart.'),{code:'missing-api-key'});
     headers.Authorization=`Bearer ${key}`;
   }
+  if(endpointFor({provider:'llamacpp'},base)===TYPESAFE_BASE) {
+    const key=process.env.TYPESAFE_API_KEY?.trim();
+    if(!key)throw Object.assign(new Error('TYPESAFE_API_KEY is not configured. Set the process environment or .env and restart.'),{code:'missing-api-key'});
+    headers.Authorization=`Bearer ${key}`;
+  }
   return headers;
 }
 export function redactSecret(text) {
+  const typesafeKey=process.env.TYPESAFE_API_KEY?.trim();
+  if(typesafeKey)text=text.replaceAll(typesafeKey,'[REDACTED]');
   const key=process.env.SAKURA_AI_API_KEY?.trim();
   if(!key)return text;
   let clean=text.replaceAll(key,'[REDACTED]');

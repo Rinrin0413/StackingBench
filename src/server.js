@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {Match,readRun,listRuns} from './match.js';
 import {DEFAULT_PLAYER,DEFAULT_MODEL,QUICK_MODEL} from './players.js';
-import {SAKURA_MODELS,endpointFor} from './providers.js';
+import {TYPESAFE_MODEL,SAKURA_MODELS,endpointFor} from './providers.js';
 import {probeModel} from './probe.js';
 
 const port=Number(process.env.PORT??3210),host='127.0.0.1',matches=new Map();
@@ -23,7 +23,7 @@ const server=createServer(async(req,res)=>{
     if(req.headers.origin&&!new Set([`http://localhost:${port}`,`http://${host}:${port}`]).has(req.headers.origin)) return json(res,403,{error:'Same origin required'});
     if(req.method==='POST'&&!req.headers['content-type']?.startsWith('application/json')) return json(res,415,{error:'JSON required'});
     const url=new URL(req.url,`http://${host}:${port}`),path=url.pathname;
-    if(req.method==='GET'&&path==='/api/config') return json(res,200,{defaults:DEFAULT_PLAYER,models:[DEFAULT_MODEL,'Gemma-4-26B-A4B_UD-Q4_K_XL_128K-ctx_fast',QUICK_MODEL,...SAKURA_MODELS],sakuraModels:SAKURA_MODELS,sakuraKeyConfigured:!!process.env.SAKURA_AI_API_KEY?.trim(),baseUrl:endpointFor({provider:'llamacpp'})});
+    if(req.method==='GET'&&path==='/api/config') return json(res,200,{defaults:DEFAULT_PLAYER,models:[DEFAULT_MODEL,'Gemma-4-26B-A4B_UD-Q4_K_XL_128K-ctx_fast',QUICK_MODEL,...SAKURA_MODELS,TYPESAFE_MODEL],typesafeKeyConfigured:!!process.env.TYPESAFE_API_KEY?.trim(),sakuraModels:SAKURA_MODELS,sakuraKeyConfigured:!!process.env.SAKURA_AI_API_KEY?.trim(),baseUrl:endpointFor({provider:'llamacpp'})});
     if(req.method==='POST'&&path==='/api/probe') {
       const {model}=await body(req);
       if(probeBusy||[...matches.values()].some(m=>m.busy||m.running))return json(res,409,{error:'Wait for the running request before probing'});

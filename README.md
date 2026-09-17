@@ -1,5 +1,7 @@
 # StackingBench
 
+TypeSafe の Jev と対戦できます。`TYPESAFE_API_KEY` を設定し、プレイヤーを「LLM · 試し読みなし」、モデルを「TypeSafe · Jev」にしてください。[接続・記録仕様](docs/typesafe.md)を参照してください。
+
 LLM の盤面理解、先読み、攻防判断を観察するローカル対戦ラボ。SRS の到達可能な配置から1個ずつ選択し、7固定ごとに交代します。初期仕様は [docs/rules.md](docs/rules.md)、開発方針は [AGENTS.md](AGENTS.md) にあります。
 
 さくらのAI Engine の `preview/Kimi-K2.6` / `preview/gemma-4-31B-it` 接続を追加しました。環境変数 `SAKURA_AI_API_KEY` と実験手順は [docs/sakura.md](docs/sakura.md) を参照してください。
