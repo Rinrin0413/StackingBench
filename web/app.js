@@ -62,7 +62,7 @@ function render() {
   $('match-label').textContent=current?`${current.header.config.players.map(p=>labels[p.type]).join(' vs ')}${frame<records.length?' · REPLAY':''}`:'対局を作成して開始';
   const end=current?.state;
   $('progress').textContent=current?.runtimeError?`保存/実行エラー: ${current.runtimeError}`:current?.stopRequested&&current.busy?'現在の判断後に停止します':current?.busy?'判断中 · 応答を待っています':end&&end.status!=='playing'?`${end.winner===null?'勝者なし':`Player ${end.winner===0?'A':'B'} 勝利`} / ${end.reason}`:current?.agentWaiting?`${agentName(current.header.config.players[current.state.active].type)} の入力を待っています`:current?.human?'あなたの番です · 7固定で交代':liveId?'次の判断を開始できます':'リプレイ操作 / 局面から比較';
-  $('decision-label').textContent=record?`#${frame} · PLAYER ${record.actor===0?'A':'B'} · ${record.move?.id??record.error?.code}`:'WAITING FOR FIRST MOVE';
+  $('decision-label').textContent=record?`#${frame} · PLAYER ${record.actor===0?'A':'B'} · ${record.move?.id??record.error?.code}`:'';
   $('reason').textContent=record?.error?`${record.error.code}: ${record.error.message}`:record?.reason??'選択理由、作戦メモ、実際の結果をここに表示します。';
   $('memo').textContent=record?.memo?`作戦メモ: ${record.memo}`:'';
   const m=record?.metrics;
