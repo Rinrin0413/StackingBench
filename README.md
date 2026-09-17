@@ -4,6 +4,8 @@ Vibe coded & Works on my machine.
 
 LLM の盤面理解、先読み、攻防判断を比較・記録するローカル対戦ベンチマーク。SRS の到達可能な配置から1個ずつ選択し、7固定ごとに交代します。初期仕様は [docs/rules.md](docs/rules.md)、開発方針は [AGENTS.md](AGENTS.md) にあります。
 
+![StackingBench の Web UI のスクリーンショット](assets/screenshot.png)
+
 ## 起動
 
 Node.js 22.8以上（検証環境は24.14）。外部パッケージのインストールは不要です。
