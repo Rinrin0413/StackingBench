@@ -6,7 +6,7 @@
 
 2026-09-17 に取得した [HTTP API](https://docs.typesafe.ai/api)、[Choice](https://docs.typesafe.ai/primitives/choice)、[function calling cookbook](https://docs.typesafe.ai/cookbooks/function_calling) に基づき、Node の fetch で `POST https://api.typesafe.ai/v1/systemone` を呼ぶ。認証は `Authorization: Bearer`。SDK 依存は追加しない。
 
-`provider=typesafe`、`model=jev-latest`、`type=llm`、`observation=text`、`decisionProtocol=typesafe-choice-v1` を保存する。公開観測とルールを state とし、幾何学順の全合法手 ID を一つの Choice の criteria に入れる。候補の間引き・評価ソート・探索 bot による選択はない。モデルの choice を検証後、既存の SRS 実行経路で固定する。試し読み・画像観測は未対応で明示エラー。ゲーム状態遷移の変更はなく、ルール v1 と既存リプレイの互換性を維持する。
+`connectionId=typesafe-jev`、`modelId=jev-latest`（旧形式では `provider=typesafe`、`model=jev-latest`）、`type=llm`、`observation=text`、`decisionProtocol=typesafe-choice-v1` を保存する。TypeSafe は OpenAI Chat Completions へ寄せず、専用 `typesafe-jev-choice` adapter を使う。公開観測とルールを state とし、幾何学順の全合法手 ID を一つの Choice の criteria に入れる。候補の間引き・評価ソート・探索 bot による選択はない。モデルの choice を検証後、既存の SRS 実行経路で固定する。試し読み・画像観測は未対応で明示エラー。ゲーム状態遷移の変更はなく、ルール v1 と既存リプレイの互換性を維持する。
 
 要求、質問、全候補、応答全体（実際のモデル名・probabilities・confidence・usage を含む）、時間、障害分類を既存の JSONL に保存する。`input_tokens` / `output_tokens` は共通集計の promptTokens / completionTokens に対応し、未報告なら null。費用は不明（null）。Jev は説明や作戦メモを生成せず、それらは空文字となる。低 confidence だけを理由に別の手へ変更しない。
 

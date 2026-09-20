@@ -1,9 +1,20 @@
-// Credentials are transport-only. Never include headers or environment values in logs.
+// Compatibility facade for the pre-connection API. New request code resolves a
+// connection profile and uses transport.js; these exports remain for old runs,
+// scripts, and callers that still pass a model/provider pair.
 import {readFileSync} from 'node:fs';
 import {homedir} from 'node:os';
 import {join} from 'node:path';
 import {parseEnv} from 'node:util';
+import {
+  SAKURA_BASE,SAKURA_MODELS,TYPESAFE_BASE,TYPESAFE_MODEL,connectionProfile,connectionForPlayer,
+  credentialHeaders,redactConnectionSecrets,validateBaseUrl
+} from './connections.js';
+import {reasoningParameters} from './protocols.js';
+
 try {process.loadEnvFile();} catch(e) {if(e.code!=='ENOENT')throw e;}
+
+export {SAKURA_BASE,SAKURA_MODELS,TYPESAFE_BASE,TYPESAFE_MODEL};
+
 export function accountKeyFromConfig(contents,name='SAKURA_AI_API_KEY') {
   if(!['SAKURA_AI_API_KEY','TYPESAFE_API_KEY'].includes(name))throw Error('Unsupported credential name');
   const line=contents.split(/\r?\n/).find(line=>new RegExp(`^\\s*${name}\\s*=`).test(line));
@@ -11,6 +22,7 @@ export function accountKeyFromConfig(contents,name='SAKURA_AI_API_KEY') {
   if(value?.includes('$'))throw Error(`${name} in environment.d must be a literal value; variable expansion is not supported`);
   return value??null;
 }
+
 for(const name of ['SAKURA_AI_API_KEY','TYPESAFE_API_KEY']) if(!process.env[name]?.trim()) {
   try {
     const key=accountKeyFromConfig(readFileSync(join(homedir(),'.config/environment.d/envvars.conf'),'utf8'),name);
@@ -18,51 +30,48 @@ for(const name of ['SAKURA_AI_API_KEY','TYPESAFE_API_KEY']) if(!process.env[name
   } catch(e) {if(e.code!=='ENOENT')throw e;}
 }
 
-export const SAKURA_BASE='https://api.ai.sakura.ad.jp';
-export const SAKURA_MODELS=['preview/Kimi-K2.6','preview/gemma-4-31B-it'];
-export const TYPESAFE_BASE='https://api.typesafe.ai';
-export const TYPESAFE_MODEL='jev-latest';
 export const providerFor=model=>model===TYPESAFE_MODEL?'typesafe':SAKURA_MODELS.includes(model)?'sakura':'llamacpp';
-export function endpointFor(config,localBase=process.env.LLM_BASE_URL??'http://localhost:8082') {
-  const value=config.provider==='typesafe'?TYPESAFE_BASE:config.provider==='sakura'?SAKURA_BASE:localBase;
-  const url=new URL(value);
-  if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash) throw Error('Endpoint must not contain credentials, query parameters or fragments');
-  return url.href.replace(/\/$/,'').replace(/\/v1$/,'');
+
+// Old callers expect the endpoint without the /v1 suffix. The new connection
+// contract keeps the suffix in profile.baseUrl and never normalizes it in the
+// native transport.
+export function endpointFor(config={},localBase=process.env.LLM_BASE_URL??'http://localhost:8082') {
+  let value,preserveApiPrefix=false;
+  if(config.connectionId) {
+    const profile=connectionProfile(config.connectionId);
+    preserveApiPrefix=profile.legacyProvider==='openai-compatible';
+    value=preserveApiPrefix?profile.baseUrl:profile.legacyBaseUrl;
+  }
+  else if(config.provider==='typesafe')value=TYPESAFE_BASE;
+  else if(config.provider==='sakura')value=SAKURA_BASE;
+  else value=localBase;
+  const url=validateBaseUrl(value);
+  return preserveApiPrefix?url.replace(/\/$/,''):url.replace(/\/$/,'').replace(/\/v1$/,'');
 }
+
 export function authHeaders(base) {
   const headers={'Content-Type':'application/json'};
-  if(endpointFor({provider:'llamacpp'},base)===SAKURA_BASE) {
-    const key=process.env.SAKURA_AI_API_KEY?.trim();
-    if(!key)throw Object.assign(new Error('SAKURA_AI_API_KEY is not configured. Set the process environment, .env, or ~/.config/environment.d/envvars.conf and restart.'),{code:'missing-api-key'});
-    headers.Authorization=`Bearer ${key}`;
-  }
-  if(endpointFor({provider:'llamacpp'},base)===TYPESAFE_BASE) {
-    const key=process.env.TYPESAFE_API_KEY?.trim();
-    if(!key)throw Object.assign(new Error('TYPESAFE_API_KEY is not configured. Set the process environment, .env, or ~/.config/environment.d/envvars.conf and restart.'),{code:'missing-api-key'});
-    headers.Authorization=`Bearer ${key}`;
-  }
+  const normalized=validateBaseUrl(base).replace(/\/$/,'').replace(/\/v1$/,'');
+  if(normalized===SAKURA_BASE)Object.assign(headers,credentialHeaders(connectionProfile('sakura-ai')));
+  if(normalized===TYPESAFE_BASE)Object.assign(headers,credentialHeaders(connectionProfile('typesafe-jev')));
   return headers;
 }
-export function redactSecret(text) {
-  const typesafeKey=process.env.TYPESAFE_API_KEY?.trim();
-  if(typesafeKey)text=text.replaceAll(typesafeKey,'[REDACTED]');
-  const key=process.env.SAKURA_AI_API_KEY?.trim();
-  if(!key)return text;
-  let clean=text.replaceAll(key,'[REDACTED]');
-  // Providers may echo only the secret portion of an account token.
-  const secret=key.includes(':')?key.slice(key.indexOf(':')+1):null;
-  if(secret&&secret.length>=8)clean=clean.replaceAll(secret,'[REDACTED]');
-  return clean;
-}
+
+export function redactSecret(text) {return redactConnectionSecrets(text);}
+
 export function pricingFor(model) {
   const rates={'preview/Kimi-K2.6':[0.6,3],'preview/gemma-4-31B-it':[0.24,0.96]}[model];
   return rates?{currency:'JPY',inputPer10k:rates[0],outputPer10k:rates[1],asOf:'2026-09-08',source:'https://ai.sakura.ad.jp/sakura-ai/ai-engine/',basis:'Published token rates before account free quota and billing adjustments; not an invoice'}:null;
 }
+
 export function estimatedCost(model,prompt,completion) {
   const p=pricingFor(model);
   return p&&Number.isFinite(prompt)&&Number.isFinite(completion)?(prompt*p.inputPer10k+completion*p.outputPer10k)/10000:null;
 }
+
 export function thinkingParameters(config) {
-  if(config.thinking!=='off')return {};
-  return {chat_template_kwargs:config.provider==='sakura'&&config.model==='preview/Kimi-K2.6'?{thinking:false}:{enable_thinking:false}};
+  if(config.thinking==='server-default')return {};
+  let profile;
+  try {profile=config.connection??connectionForPlayer(config);} catch {return {};}
+  return reasoningParameters({...config,connection:profile});
 }

@@ -2,7 +2,7 @@
 
 実行結果と保存対局IDは [実測記録](sakura-validation.md) を参照してください。
 
-対象は `preview/Kimi-K2.6` と `preview/gemma-4-31B-it`。UIまたはCLIでこのIDを選ぶとprovider=sakuraとして `https://api.ai.sakura.ad.jp/v1/chat/completions` に接続します。ゲームルールv1、合法手順序、観測、固定botは変更しません。
+対象は `preview/Kimi-K2.6` と `preview/gemma-4-31B-it`。UIまたはCLIで connection=`sakura-ai` とこの model ID を選ぶと、`openai-chat-completions` adapter 経由で `https://api.ai.sakura.ad.jp/v1/chat/completions` に接続します。旧 model-only 指定では従来どおり Sakura preset へ互換 mapping します。ゲームルールv1、合法手順序、観測、固定botは変更しません。
 
 ## APIキー
 

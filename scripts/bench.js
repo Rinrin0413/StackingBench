@@ -1,17 +1,29 @@
 import {writeFile,mkdir} from 'node:fs/promises';
 import {Match,RUNS} from '../src/match.js';
 import {DEFAULT_MODEL,playerConfig} from '../src/players.js';
+import {probeConnection} from '../src/probe.js';
 
 const args=process.argv.slice(2),option=(name,fallback)=>{const i=args.indexOf(`--${name}`);return i<0?fallback:args[i+1];};
 const seeds=option('seeds','101').split(',').map(Number),swap=args.includes('--swap');
 const model=option('model',DEFAULT_MODEL),maxLocks=Number(option('max-locks','280'));
+const connection=option('connection',null),connectionA=option('connection-a',connection),connectionB=option('connection-b',connection);
 const settings={model,requestIntervalMs:Number(option('request-interval-ms','0')),transitions:Number(option('transitions','32')),maxTokens:Number(option('max-tokens','2048')),thinking:option('thinking','server-default'),
   decisionTokens:Number(option('decision-tokens','8192')),timeoutMs:Number(option('timeout-ms','120000')),maxCalls:Number(option('max-calls','34'))};
-const players=[{...settings,model:option('model-a',model),type:option('a','search')},{...settings,model:option('model-b',model),type:option('b','search')}].map(playerConfig);
-if(players.some(p=>['human','codex'].includes(p.type)))throw Error('Interactive players require the browser; batch mode supports search and LLM players only');
+const players=[{...settings,...(connectionA?{connectionId:connectionA}:{}),modelId:option('model-a',model),type:option('a','search')},{...settings,...(connectionB?{connectionId:connectionB}:{}),modelId:option('model-b',model),type:option('b','search')}].map(playerConfig);
+if(players.some(p=>['human','codex','agy'].includes(p.type)))throw Error('Interactive players require the browser; batch mode supports search and LLM players only');
+const preflight=args.includes('--probe')||args.includes('--preflight'),capabilitySnapshots=[];
+if(preflight) {
+  const seen=new Map();
+  for(const [index,p] of players.entries()) if(['llm','llm-preview'].includes(p.type)) {
+    const key=`${p.connectionId}\0${p.modelId}`;
+    const result=seen.get(key)??await probeConnection(p.connectionId,p.modelId,{refresh:true});seen.set(key,result);
+    if(!result.ok)throw Error(`Capability probe failed for ${p.connectionId}/${p.modelId}: ${result.error}`);
+    capabilitySnapshots[index]=result.snapshot;
+  }
+}
 const results=[];
 for(const seed of seeds) for(const first of swap?[0,1]:[0]) {
-  const match=await Match.create({seeds:[seed,((seed^0x6c078965)>>>0)||1],first,maxLocks,players});
+  const match=await Match.create({seeds:[seed,((seed^0x6c078965)>>>0)||1],first,maxLocks,players,capabilitySnapshots});
   console.log(`Starting ${match.id}: ${players[0].type} vs ${players[1].type}, seed=${seed}, first=${first}`);
   while(match.state.status==='playing') {
     const r=await match.step();console.log(JSON.stringify({lock:match.state.locks,actor:r.actor,move:r.move?.id,ms:Math.round(r.metrics?.elapsedMs??0),sent:match.state.last?.sent,error:r.error?.code}));

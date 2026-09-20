@@ -10,6 +10,7 @@ test('thinking controls use the model template key and preserve server defaults'
   assert.deepEqual(thinkingParameters(playerConfig({model:SAKURA_MODELS[1],thinking:'off'})),{chat_template_kwargs:{enable_thinking:false}});
   assert.deepEqual(thinkingParameters(playerConfig({thinking:'off'})),{chat_template_kwargs:{enable_thinking:false}});
   assert.deepEqual(thinkingParameters(playerConfig({model:SAKURA_MODELS[0]})),{});
+  assert.throws(()=>playerConfig({model:SAKURA_MODELS[0],thinking:'low'}),/not supported/);
 });
 test('environment.d extraction reads only the exact named variable without expansion',()=>{
   assert.equal(accountKeyFromConfig(`OTHER_KEY=unrelated\nSAKURA_AI_API_KEY="${fakeKey}"\nPATH=/ignore`),fakeKey);

@@ -67,6 +67,9 @@ LLM プレイヤー（`llm` / `llm-preview`）は、ローカル推論サーバ�
 - **TypeSafe Jev**
   TypeSafe の Jev Choice プリミティブを用いた合法手選択に対応しています。環境変数 `TYPESAFE_API_KEY` を設定し、プレイヤーを「LLM · 試し読みなし」、モデルを「TypeSafe · Jev」に設定してください。接続仕様は [docs/typesafe.md](docs/typesafe.md) を参照してください。
 
+- **汎用 OpenAI-compatible 接続**
+  `connectionId` と `modelId` を分けて扱います。OpenRouter、Groq、Cerebras は preset として利用でき、任意の OpenAI-compatible Chat Completions endpoint は `config/connections.json` に登録できます。接続の詳細は [docs/connections.md](docs/connections.md) を参照してください。OpenRouter は `OPENROUTER_API_KEY`、Groq は `GROQ_API_KEY`、Cerebras は `CEREBRAS_API_KEY` をサーバー側だけに設定します。
+
 ### コーディングエージェント セッションとの対戦
 
 チャットやコーディングエージェントの会話セッション自体を対戦相手にできます。専用コマンド `scripts/agent.js` を介して公開観測を取得し、手を送信します。ブラウザからセッションを自動起動する機能はありません。
@@ -104,6 +107,10 @@ pnpm run bench -- --a llm-preview --b llm --model Qwen3.6-35B-A3B_UD-Q4_K_XL_128
 # 空の同一局面を3条件で各1判断（対局成績には含めない）
 pnpm run compare -- --model Qwen3.6-35B-A3B_UD-Q4_K_XL_128K-ctx_fast --thinking off
 
+# connection と model を明示した generic endpoint の比較
+pnpm run bench -- --connection-a openrouter --model-a openai/model-id --a llm --b search --max-locks 14
+pnpm run probe -- --connection groq llama-model-id
+
 # 保存した局面を使う（RUN_ID は拡張子なし、index=0 は開始時）
 pnpm run compare -- --run RUN_ID --index 14 --model MODEL_ID --thinking off
 pnpm run replay -- RUN_ID
@@ -112,7 +119,7 @@ pnpm test
 pnpm run check
 ```
 
-生成上限2048は**応答ごと**、全判断の生成予算8192、最大34往復、応答待ち120秒が初期値です。試し読み予算は1判断32遷移。UI の詳細設定で変更できます。CLI は `--max-tokens` / `--transitions` も利用できます。`--thinking off` は `chat_template_kwargs.enable_thinking=false` を送ります。既定設定と混ぜず、別条件として集計してください。
+生成上限2048は**応答ごと**、全判断の生成予算8192、最大34往復、応答待ち120秒が初期値です。試し読み予算は1判断32遷移。UI の詳細設定で変更できます。CLI は `--max-tokens` / `--transitions` も利用できます。`--thinking off` は接続 profile が宣言した wire mapping で送られ、ローカル/Sakura では `chat_template_kwargs` を使います。未確認の generic connection は provider-specific reasoning parameter を推測して送らず、wire mapping の明示設定と、必要に応じた acceptance probe が必要です。既定設定と混ぜず、別条件として集計してください。
 
 初回の Qwen 検証では、サーバー既定の思考設定で2応答とも2048tokenに到達し、本文が空のまま打切られました。最初の接続確認には、明示的な思考無効設定か、用途に合わせた出力予算の見直しが必要です。詳細と実測値は [docs/validation.md](docs/validation.md) に保存します。
 
@@ -120,7 +127,7 @@ pnpm run check
 
 ## ログと再現性
 
-`runs/` に対局JSONL、probe・batch・position比較JSONが保存されます。Git対象外です。対局JSONLはheader、decision、endの順に追記。各decisionは設定済みプロンプト、要求/応答、usage、試し読み履歴、選択ID、操作列、盤面、ハッシュ、説明・メモ、時間とエラーを保存します。headerにルール、seed、完全な初期状態、ソースハッシュと取得できたGitリビジョンを保存します。
+`runs/` に対局JSONL、probe・batch・position比較JSONが保存されます。Git対象外です。対局JSONLはheader、decision、endの順に追記。各decisionは設定済みプロンプト、要求/応答、usage、試し読み履歴、選択ID、操作列、盤面、ハッシュ、説明・メモ、時間とエラーを保存します。headerにルール、seed、完全な初期状態、ソースハッシュと取得できたGitリビジョンを保存します。LLM 条件には `connectionId`、`modelId`、protocol、capability snapshot、structured-output / reasoning policy、request extension を保存します。custom/internal endpoint の raw URL と credential は保存せず、同一 endpoint 識別用の fingerprint を使います。
 
 通信障害・timeoutは無効、不正出力は1回だけ再試行し再失敗で失格。無断のbot代替はありません。停止は進行中の判断を待って aborted として保存します。プロセスが突然終了した場合は最後に保存できた判断まで復元でき、末尾の書きかけ行は読み飛ばします。**進行中の未完了判断の応答は保証されません**。
 
@@ -135,7 +142,11 @@ pnpm run check
 |`src/engine.js`|ルール、SRS、合法手列挙、決定的状態遷移|
 |`src/observation.js`|公開観測と既知情報だけの試し読み|
 |`src/players.js`|共通プレイヤー接続口、評価探索、LLMプロトコルと予算|
-|`src/providers.js`|接続先・認証・秘密情報の除外・公開レートに基づく費用推定|
+|`src/providers.js`|旧 provider API の互換 facade と Sakura 料金・legacy mapping|
+|`src/connections.js`|connection profile、URL/credential validation、公開 projection、endpoint identity|
+|`src/protocols.js`|OpenAI-compatible Chat Completions と TypeSafe dialect の request/response 差分|
+|`src/transport.js`|native fetch、credential/static header、timeout、redaction、hidden retry のない HTTP transport|
+|`src/capabilities.js`|connection + model 単位の probe、cache、capability snapshot|
 |`src/probe.js`|対局と分離した生成の疎通確認|
 |`src/agent.js`|Codex / agy セッション用の公開観測・試し読み予算・選択JSON検証|
 |`src/match.js`|対局進行、JSONL保存、集計|

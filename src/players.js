@@ -3,7 +3,10 @@ import {performance} from 'node:perf_hooks';
 import {setTimeout as delay} from 'node:timers/promises';
 import {legalMoves,pendingCount} from './engine.js';
 import {observe,PreviewSession} from './observation.js';
-import {TYPESAFE_BASE,TYPESAFE_MODEL,providerFor,endpointFor,authHeaders,redactSecret,estimatedCost,thinkingParameters} from './providers.js';
+import {TYPESAFE_MODEL,providerFor,endpointFor,estimatedCost} from './providers.js';
+import {connectionForPlayer,connectionForLegacyEndpoint,connectionProfile,validateRoutingPolicy,capabilityDefaultsForModel,endpointIdentity,redactConnectionSecrets} from './connections.js';
+import {requestJson,TransportError} from './transport.js';
+import {buildChatRequest,buildTypeSafeRequest,extractContent,extractFinishReason,extractUsage,observedRoutingMetadata,reasoningParameters} from './protocols.js';
 
 export const DEFAULT_MODEL='Qwen3.6-35B-A3B_UD-Q4_K_XL_128K-ctx_fast';
 export const QUICK_MODEL='Gemma-4-E2B_UD_Q4_K_XL_fast';
@@ -20,10 +23,19 @@ export function playerConfig(value={}) {
     if(typeof preview!=='boolean'||!Number.isInteger(transitions)||transitions<1||transitions>2048)throw Error('Invalid agent preview settings');
     return {type:value.type,observation:'text',input:`${value.type}-session-v1`,preview,transitions,model:null,agentModel:agentModel(value.agentModel===undefined&&value.type==='agy'?'Gemini':value.agentModel),reasoningEffort:value.type==='agy'?null:reasoningEffort(value.reasoningEffort),metadataSource:'user-configured'};
   }
-  const provider=value.provider??providerFor(value.model??DEFAULT_MODEL);
-  if(provider==='typesafe')value={...value,responseFormat:'schema',temperature:0.2,maxTokens:2048,decisionTokens:8192};
-  const p={...DEFAULT_PLAYER,...(provider==='sakura'?{responseFormat:'plain',responseParsing:'json-fence-v1'}:{}),...value,provider};
-  if(!['llamacpp','sakura','typesafe'].includes(provider))throw Error('Unknown provider');
+  const modelId=value.modelId??value.model??DEFAULT_MODEL;
+  const inferredProvider=value.provider??(value.connectionId?connectionProfile(value.connectionId).legacyProvider:providerFor(modelId));
+  const connection=value.connectionId?connectionProfile(value.connectionId):connectionForPlayer({provider:inferredProvider,model:modelId});
+  if(value.connectionId&&value.provider&&value.provider!==connection.legacyProvider)throw Error('Provider and connection do not match');
+  const provider=value.provider??connection.legacyProvider;
+  const typesafe=connection.protocol==='typesafe-jev-choice'||provider==='typesafe';
+  if(typesafe)value={...value,responseFormat:'schema',temperature:0.2,maxTokens:2048,decisionTokens:8192};
+  const genericDefaults=connection.id==='local-llamacpp'||connection.id==='sakura-ai'||typesafe?{}:{responseFormat:'plain'};
+  const p={...DEFAULT_PLAYER,...(provider==='sakura'?{responseFormat:'plain',responseParsing:'json-fence-v1'}:{}),...genericDefaults,...value,provider,connectionId:connection.id,modelId,model:modelId,protocol:connection.protocol};
+  delete p.baseUrl;delete p.connection;delete p.credential;delete p.staticHeaders;delete p.requestDefaults;
+  p.routingPolicy=validateRoutingPolicy(value.routingPolicy??connection.routingPolicy,p.connectionId);
+  if(p.routingPolicy!==null&&Object.hasOwn(connection.requestDefaults,'provider'))throw Error('Routing policy conflicts with connection requestDefaults.provider');
+  if(!['llamacpp','sakura','typesafe','openai-compatible'].includes(provider))throw Error('Unknown provider');
   if(provider==='sakura'&&p.responseFormat!=='plain')throw Error('Sakura structured output is unverified; use responseFormat=plain');
   if(!['strict','json-fence-v1'].includes(p.responseParsing))throw Error('Unknown response parser');
   if(!['search','llm','llm-preview'].includes(p.type)) throw Error('Unknown player type');
@@ -33,13 +45,21 @@ export function playerConfig(value={}) {
     if(!Number.isInteger(p[key])||p[key]<min||p[key]>max) throw Error(`Invalid ${key}`);
   if(typeof p.model!=='string'||!p.model.length||p.model.length>300) throw Error('Invalid model');
   if(!Number.isFinite(p.temperature)||p.temperature<0||p.temperature>2) throw Error('Invalid temperature');
-  if(!['schema','json','plain'].includes(p.responseFormat)||!['server-default','off'].includes(p.thinking)) throw Error('Invalid generation setting');
-  if(provider==='typesafe') {
+  if(!['schema','json','plain'].includes(p.responseFormat)||!['server-default','off','low','medium','high'].includes(p.thinking)) throw Error('Invalid generation setting');
+  const capabilities=capabilityDefaultsForModel(connection,modelId),reasoningWire=capabilities.reasoningWire;
+  if(p.responseFormat==='json'&&capabilities.jsonObject===false)throw Error(`JSON object mode is not supported by ${connection.id}`);
+  if(p.responseFormat==='schema'&&capabilities.jsonSchema===false)throw Error(`JSON schema mode is not supported by ${connection.id}`);
+  if(p.thinking!=='server-default'&&capabilities.reasoning===false)throw Error(`Reasoning policy is not supported by ${connection.id}`);
+  if(p.thinking!=='server-default'&&!reasoningWire&&provider==='openai-compatible')throw Error('Reasoning policy is not verified for this connection');
+  if(reasoningWire==='chat_template_kwargs'&&p.thinking!=='server-default'&&p.thinking!=='off')throw Error(`Reasoning level ${p.thinking} is not supported by ${connection.id}`);
+  if(p.thinking==='off'&&reasoningWire==='reasoning_effort'&&capabilities.reasoningOffValue===undefined)throw Error('Reasoning off policy is not verified for this connection');
+  if(typesafe) {
     if(p.model!==TYPESAFE_MODEL)throw Error('Unsupported TypeSafe model');
     if(p.type!=='llm')throw Error('TypeSafe Jev supports llm (no preview) only');
     Object.assign(p,{responseFormat:'choice',responseParsing:'strict',thinking:'server-default',temperature:null,maxTokens:null,decisionTokens:null,
       decisionProtocol:'typesafe-choice-v1',tokenBudgetPolicy:'provider-managed; no generation token limit supported'});
   }
+  Object.defineProperty(p,'connection',{value:connection,enumerable:false});
   return p;
 }
 export function evaluate(state,actor,result) {
@@ -116,17 +136,21 @@ export function validateTypeSafeChoice(answer,ids) {
     ids.some(id=>probs[id]>probs[answer.choice]+1e-6))throw responseError('invalid-response','Invalid TypeSafe probability distribution');
 }
 export async function completion(baseUrl,body,timeoutMs) {
-  let response,raw;
-  const signal=AbortSignal.timeout(timeoutMs);
-  let headers;
-  try {headers=authHeaders(baseUrl);} catch(e) {throw new DecisionError(e.code??'configuration',e.message);}
-  try {
-    response=await fetch(`${endpointFor({provider:'llamacpp'},baseUrl)}/v1/${endpointFor({provider:'llamacpp'},baseUrl)===TYPESAFE_BASE?'systemone':'chat/completions'}`,{method:'POST',headers,body:JSON.stringify(body),signal,redirect:'error'});
-    raw=redactSecret(await response.text());
+  try {return await requestJson(connectionForLegacyEndpoint(baseUrl),body,timeoutMs);}
+  catch(e) {
+    if(e instanceof DecisionError)throw e;
+    if(e instanceof TransportError)throw new DecisionError(e.code,e.message,'invalid',e.detail);
+    throw new DecisionError('connection',redactConnectionSecrets(e.message??String(e)));
   }
-  catch(e) {throw new DecisionError(signal.aborted?'timeout':'connection',redactSecret(e.message));}
-  if(!response.ok) throw new DecisionError('http',`HTTP ${response.status}`, 'invalid',{status:response.status,body:raw});
-  try { return JSON.parse(raw); } catch { throw new DecisionError('api-json','Server returned invalid JSON','invalid',{body:raw}); }
+}
+
+export async function completionForConnection(connection,body,timeoutMs) {
+  try {return await requestJson(connection,body,timeoutMs);}
+  catch(e) {
+    if(e instanceof DecisionError)throw e;
+    if(e instanceof TransportError)throw new DecisionError(e.code,e.message,'invalid',e.detail);
+    throw new DecisionError('connection',redactConnectionSecrets(e.message??String(e)));
+  }
 }
 const nextRequestAt=new Map();
 async function paceRequest(endpoint,interval) {
@@ -136,43 +160,59 @@ async function paceRequest(endpoint,interval) {
   if(wait)await delay(wait);
   return wait;
 }
-export async function llmDecision(game,config,{baseUrl='http://localhost:8082',memo='',transport=completion}={}) {
-  baseUrl=endpointFor(config,baseUrl);
+function decisionConnection(config,baseUrl) {
+  const configured=config.connection??(config.connectionId?connectionProfile(config.connectionId):null);
+  if(configured&&!(configured.id==='local-llamacpp'&&baseUrl&&endpointFor({provider:'llamacpp'},baseUrl)!==configured.legacyBaseUrl))return configured;
+  return connectionForPlayer(config,baseUrl);
+}
+function traceResponse(value,connection) {
+  try {return JSON.parse(redactConnectionSecrets(JSON.stringify(value),[connection]));}
+  catch {return value;}
+}
+function traceSafe(value,connection) {
+  try {return JSON.parse(redactConnectionSecrets(JSON.stringify(value),[connection]));}
+  catch {return null;}
+}
+export async function llmDecision(game,config,{baseUrl=process.env.LLM_BASE_URL??'http://localhost:8082',memo='',transport=completion}={}) {
+  const connection=decisionConnection(config,baseUrl),traceEndpoint=connection.publicEndpoint?connection.legacyBaseUrl:undefined;
   const start=performance.now(),moves=legalMoves(game),session=config.type==='llm-preview'?new PreviewSession(game,config.transitions):null;
-  const typesafe=config.provider==='typesafe';
+  const typesafe=connection.protocol==='typesafe-jev-choice'||config.provider==='typesafe';
   const messages=[{role:'system',content:systemPrompt(config,game.rules)},{role:'user',content:JSON.stringify(observe(game,moves,memo))}];
   const trace={requests:[],previews:[]};
   const metrics={elapsedMs:0,pacingMs:0,transitions:0,calls:0,promptTokens:0,completionTokens:0,usageMissing:0,invalidResponses:0,cost:null};
   let spent=0,errors=0;
-  const finish=()=>{metrics.elapsedMs=performance.now()-start;metrics.transitions=session?.used??0;metrics.estimatedCostJpy=config.provider==='sakura'?estimatedCost(config.model,metrics.promptTokens,metrics.completionTokens):null;trace.previews=session?.history??[];};
+  const finish=()=>{metrics.elapsedMs=performance.now()-start;metrics.transitions=session?.used??0;metrics.estimatedCostJpy=connection.legacyProvider==='sakura'?estimatedCost(config.modelId??config.model,metrics.promptTokens,metrics.completionTokens):null;trace.previews=session?.history??[];};
   try {
     for(let call=0;call<config.maxCalls;call++) {
       const available=typesafe?Infinity:config.decisionTokens-spent;
       if(available<32) throw new DecisionError('token-budget','Decision generation budget exhausted','forfeit');
-      let body={model:config.model,messages:structuredClone(messages),temperature:config.temperature,max_tokens:Math.min(config.maxTokens,available),stream:false};
-      if(config.responseFormat!=='plain') body.response_format=config.responseFormat==='json'?{type:'json_object'}:{type:'json_object',schema:ACTION_SCHEMA};
-      Object.assign(body,thinkingParameters(config));
-      if(typesafe)body={model:config.model,state:{rules:game.rules,observation:observe(game,moves,memo)},questions:{move:{type:'choice',
-        instructions:typesafeInstructions(game.rules)+(errors?' Previous response was invalid. Select an option from the supplied criteria.':''),
-        criteria:Object.fromEntries(moves.map(m=>[m.id,`Execute the legal placement with id ${m.id} in observation.legalMoves.`]))}}};
-      const pacingMs=await paceRequest(baseUrl,config.requestIntervalMs);
+      let body;
+      if(typesafe)body=buildTypeSafeRequest(config,game,observe(game,moves,memo),typesafeInstructions(game.rules)+(errors?' Previous response was invalid. Select an option from the supplied criteria.':''),Object.fromEntries(moves.map(m=>[m.id,`Execute the legal placement with id ${m.id} in observation.legalMoves.`])));
+      else body=buildChatRequest({...config,connection},messages,ACTION_SCHEMA,available);
+      const pacingKey=connection.id+':'+connection.baseUrl,pacingMs=await paceRequest(pacingKey,config.requestIntervalMs);
       metrics.pacingMs+=pacingMs;
-      const record={request:body,provider:config.provider??'llamacpp',endpoint:baseUrl,pacingMs,startedAt:new Date().toISOString()}; trace.requests.push(record);metrics.calls++;
+      const record={request:body,provider:config.provider??connection.legacyProvider,connectionId:connection.id,modelId:config.modelId??config.model,protocol:connection.protocol,
+        ...(traceEndpoint?{endpoint:traceEndpoint}:{}),endpointIdentity:endpointIdentity(connection),endpointFingerprint:endpointIdentity(connection).kind==='endpoint-fingerprint'?endpointIdentity(connection).value:null,
+        routingPolicy:config.routingPolicy??connection.routingPolicy??null,pacingMs,startedAt:new Date().toISOString()}; trace.requests.push(record);metrics.calls++;
       const callStart=performance.now(); let data;
-      try { data=await transport(baseUrl,body,config.timeoutMs);record.response=data; }
-      catch(e) {record.error={code:e.code??'connection',message:e.message,detail:e.detail};metrics.usageMissing++;metrics.promptTokens=null;metrics.completionTokens=null;throw e;}
+      try {
+        data=transport===completion?await completionForConnection(connection,body,config.timeoutMs):await transport(connection.legacyBaseUrl,body,config.timeoutMs);
+        record.response=traceResponse(data,connection);
+        record.observedRouting=connection.id==='openrouter'||connection.routingPolicy?observedRoutingMetadata(data):{status:'unknown',reason:'not-an-observed-routing-connection'};
+      }
+      catch(e) {record.error={code:e.code??'connection',message:redactConnectionSecrets(e.message??String(e),[connection]),detail:traceSafe(e.detail,connection)};metrics.usageMissing++;metrics.promptTokens=null;metrics.completionTokens=null;throw e;}
       finally {record.elapsedMs=performance.now()-callStart;}
-      const usage=typesafe?{prompt_tokens:data.usage?.input_tokens,completion_tokens:data.usage?.output_tokens}:data.usage,knownUsage=Number.isFinite(usage?.completion_tokens)&&Number.isFinite(usage?.prompt_tokens);
+      const usage=extractUsage(data),knownUsage=Number.isFinite(usage?.completion_tokens)&&Number.isFinite(usage?.prompt_tokens);
       if(knownUsage) {
         if(metrics.completionTokens!==null) metrics.completionTokens+=usage.completion_tokens;
         if(metrics.promptTokens!==null) metrics.promptTokens+=usage.prompt_tokens;
       } else {metrics.usageMissing++;metrics.promptTokens=null;metrics.completionTokens=null;}
       if(!typesafe)spent+=Number.isFinite(usage?.completion_tokens)?usage.completion_tokens:body.max_tokens;
-      const choice=data.choices?.[0],content=typesafe?JSON.stringify({action:'choose',move:data.answers?.move?.choice}):choice?.message?.content;
+      const choice=data.choices?.[0],content=typesafe?JSON.stringify({action:'choose',move:data.answers?.move?.choice}):extractContent(data);
       messages.push({role:'assistant',content:typeof content==='string'?content:''});
       try {
         if(typesafe)validateTypeSafeChoice(data.answers?.move,moves.map(m=>m.id));
-        if(choice?.finish_reason==='length') throw responseError('output-truncated','Output was truncated; produce a shorter valid JSON response');
+        if(extractFinishReason(data)==='length') throw responseError('output-truncated','Output was truncated; produce a shorter valid JSON response');
         if(typeof content!=='string') throw Error('Missing message.content');
         const parsed=parseAction(content,config.responseParsing);
         const a=parsed.value;

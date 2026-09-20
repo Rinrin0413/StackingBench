@@ -7,9 +7,13 @@ import {performance} from 'node:perf_hooks';
 import {createGame,clone,legalMoves,applyMove,publicMove,replayPath,pendingCount} from './engine.js';
 import {playerConfig,decide,DecisionError} from './players.js';
 import {endpointFor,pricingFor} from './providers.js';
+import {connectionProfile,capabilityDefaultsForModel,endpointIdentity,endpointFingerprint} from './connections.js';
+import {capabilityForConfig,assertCapabilitySelection,cachedCapability,ensureCapabilitySnapshot} from './capabilities.js';
+import {responseFormatPolicy} from './protocols.js';
 import {AgentTurn} from './agent.js';
 
 export const RUNS=resolve(process.env.STACKINGBENCH_RUNS??'runs');
+export const RUN_FORMAT=Number.isInteger(Number(process.env.STACKINGBENCH_RUN_FORMAT))&&Number(process.env.STACKINGBENCH_RUN_FORMAT)>=2?Number(process.env.STACKINGBENCH_RUN_FORMAT):2;
 export const hashState=state=>createHash('sha256').update(JSON.stringify(state)).digest('hex');
 export async function readRun(id) {
   if(!/^[a-zA-Z0-9_-]+$/.test(id)) throw Error('Invalid run ID');
@@ -49,20 +53,45 @@ export function summarize(state,records) {
 }
 export class Match {
   static async create(options={}) {
-    const players=(options.players??[{},{}]).map(playerConfig);
+    let players=(options.players??[{},{}]).map((value,index)=>playerConfig({...value,...(options.capabilitySnapshots?.[index]?{capabilitySnapshot:options.capabilitySnapshots[index]}:{})}));
     if(players.length!==2) throw Error('Two player configurations required');
     const initial=options.initialState?clone(options.initialState):createGame(options);
     if(initial.rules.version!==1||initial.status!=='playing') throw Error('Only active v1 positions can be resumed');
-    const config={players,baseUrl:endpointFor({provider:'llamacpp'}),connections:players.map(p=>['search','human','codex','agy'].includes(p.type)?null:{provider:p.provider,baseUrl:endpointFor(p),pricing:p.provider==='sakura'?pricingFor(p.model):null}),parent:options.parent??null};
+    if(options.preflightCapabilities) {
+      for(const [index,player] of players.entries()) {
+        if(['search','human','codex','agy'].includes(player.type))continue;
+        const profile=player.connection??connectionProfile(player.connectionId),snapshot=await ensureCapabilitySnapshot(profile,player.modelId??player.model,{refresh:options.refreshCapabilities===true,
+          targets:options.probeTargets,timeoutMs:player.timeoutMs,transport:options.probeTransport??undefined,cachePath:options.capabilityCachePath});
+        players[index]=playerConfig({...player,capabilitySnapshot:snapshot});
+      }
+    }
+    if(options.useCapabilityCache!==false&&!options.preflightCapabilities) {
+      for(const [index,player] of players.entries()) {
+        if(['search','human','codex','agy'].includes(player.type)||player.capabilitySnapshot)continue;
+        const profile=player.connection??connectionProfile(player.connectionId),snapshot=await cachedCapability(profile,player.modelId??player.model,{cachePath:options.capabilityCachePath});
+        if(snapshot)players[index]=playerConfig({...player,capabilitySnapshot:snapshot});
+      }
+    }
+    const connections=players.map(p=>{
+      if(['search','human','codex','agy'].includes(p.type))return null;
+      const profile=p.connection??connectionProfile(p.connectionId),snapshot=capabilityForConfig(p,profile);
+      if(options.preflightCapabilities||p.capabilitySnapshot)assertCapabilitySelection(p,profile,snapshot,{requireSupported:true});
+      const modelId=p.modelId??p.model,capabilities=capabilityDefaultsForModel(profile,modelId);
+      return {connectionId:profile.id,modelId,protocol:profile.protocol,endpointFingerprint:endpointFingerprint(profile),endpointIdentity:endpointIdentity(profile),
+        capabilitySnapshot:snapshot,structuredOutput:{requested:p.responseFormat,parser:p.responseParsing,wire:responseFormatPolicy({...p,connection:profile})},reasoning:{policy:p.thinking,wire:capabilities.reasoningWire??null},
+        requestExtensions:{requestDefaults:profile.requestDefaults,routingPolicy:p.routingPolicy??profile.routingPolicy??null,staticHeaders:profile.staticHeaders},pricing:p.provider==='sakura'?pricingFor(p.model):profile.pricing};
+    });
+    const config={players,connections,parent:options.parent??null};
     const m=new Match();
     m.id=`${new Date().toISOString().replace(/[:.]/g,'-')}_${randomUUID().slice(0,8)}`;
     m.state=initial;m.config=config;m.records=[];m.memos=['',''];m.running=false;m.busy=false;m.stopRequested=false;m.ended=false;
     let sourceRevision=null,sourceDirty=null;
     try {sourceRevision=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();sourceDirty=!!execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim();} catch { /* Initial uncommitted workspace. */ }
-    const sourceFiles=['engine.js','observation.js','players.js','match.js','providers.js','agent.js','agent-identity.js'];
+    const sourceFiles=['engine.js','observation.js','players.js','match.js','providers.js','connections.js','protocols.js','transport.js','capabilities.js','agent.js','agent-identity.js'];
     const sourceHash=createHash('sha256');for(const file of sourceFiles)sourceHash.update(await readFile(new URL(file,import.meta.url)));
-    m.header={type:'header',format:1,id:m.id,createdAt:new Date().toISOString(),config,initialState:clone(initial),initialHash:hashState(initial),
+    m.header={type:'header',format:RUN_FORMAT,id:m.id,createdAt:new Date().toISOString(),config,initialState:clone(initial),initialHash:hashState(initial),
       runtime:process.version,engineVersion:'0.1.0',sourceRevision,sourceDirty,sourceHash:sourceHash.digest('hex')};
+    m.baseUrl=endpointFor({provider:'llamacpp'});
     await mkdir(RUNS,{recursive:true});m.path=join(RUNS,`${m.id}.jsonl`);await m.write(m.header);
     m.inputSince=performance.now();
     return m;
@@ -149,7 +178,7 @@ export class Match {
     const actor=this.state.active,record={type:'decision',index:this.records.length,actor,beforeHash:hashState(this.state)};
     try {
       if(!legalMoves(this.state).length) throw new DecisionError('no-moves','No legal placements','forfeit');
-      const decision=supplied??await decide(this.state,this.config.players[actor],{baseUrl:this.config.baseUrl,memo:this.memos[actor],transport});
+      const decision=supplied??await decide(this.state,this.config.players[actor],{baseUrl:this.baseUrl,memo:this.memos[actor],transport});
       Object.assign(record,decision);
       this.state=applyMove(this.state,decision.move).state;
       this.memos[actor]=decision.memo;

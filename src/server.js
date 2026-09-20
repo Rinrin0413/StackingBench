@@ -4,13 +4,20 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {Match,readRun,listRuns} from './match.js';
 import {DEFAULT_PLAYER,DEFAULT_MODEL,QUICK_MODEL} from './players.js';
-import {TYPESAFE_MODEL,SAKURA_MODELS,endpointFor} from './providers.js';
-import {probeModel} from './probe.js';
+import {TYPESAFE_MODEL,SAKURA_MODELS} from './providers.js';
+import {probeModel,probeConnection} from './probe.js';
+import {connectionProfile,loadConnectionProfiles,publicConnection,configuredConnection} from './connections.js';
+import {getModels,TransportError} from './transport.js';
 
 const port=Number(process.env.PORT??3210),host='127.0.0.1',matches=new Map();
 let probeBusy=false;
 const web=fileURLToPath(new URL('../web/',import.meta.url));
 const json=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value));};
+function publicProbeResult(result) {
+  const features=result.features?Object.fromEntries(Object.entries(result.features).map(([key,value])=>[key,{status:value.status}])):undefined;
+  return {ok:result.ok,connectionId:result.connectionId??null,modelId:result.modelId??result.model??null,protocol:result.protocol??null,provider:result.provider??null,
+    elapsedMs:result.elapsedMs??null,cached:result.cached??false,...(features?{features}:{}),error:result.ok?null:'Connection probe failed'};
+}
 async function body(req) {
   let text='';
   for await(const chunk of req) {text+=chunk;if(text.length>100000) throw Error('Request body too large');}
@@ -23,17 +30,28 @@ const server=createServer(async(req,res)=>{
     if(req.headers.origin&&!new Set([`http://localhost:${port}`,`http://${host}:${port}`]).has(req.headers.origin)) return json(res,403,{error:'Same origin required'});
     if(req.method==='POST'&&!req.headers['content-type']?.startsWith('application/json')) return json(res,415,{error:'JSON required'});
     const url=new URL(req.url,`http://${host}:${port}`),path=url.pathname;
-    if(req.method==='GET'&&path==='/api/config') return json(res,200,{defaults:DEFAULT_PLAYER,models:[DEFAULT_MODEL,'Gemma-4-26B-A4B_UD-Q4_K_XL_128K-ctx_fast',QUICK_MODEL,...SAKURA_MODELS,TYPESAFE_MODEL],typesafeKeyConfigured:!!process.env.TYPESAFE_API_KEY?.trim(),sakuraModels:SAKURA_MODELS,sakuraKeyConfigured:!!process.env.SAKURA_AI_API_KEY?.trim(),baseUrl:endpointFor({provider:'llamacpp'})});
+    if(req.method==='GET'&&path==='/api/config') {
+      const profiles=loadConnectionProfiles(),known=[DEFAULT_MODEL,'Gemma-4-26B-A4B_UD-Q4_K_XL_128K-ctx_fast',QUICK_MODEL,...SAKURA_MODELS,TYPESAFE_MODEL];
+      return json(res,200,{defaults:DEFAULT_PLAYER,models:[...new Set(known)],connections:profiles.map(publicConnection),
+        typesafeKeyConfigured:configuredConnection(connectionProfile('typesafe-jev')),sakuraModels:SAKURA_MODELS,sakuraKeyConfigured:configuredConnection(connectionProfile('sakura-ai'))});
+    }
     if(req.method==='POST'&&path==='/api/probe') {
-      const {model}=await body(req);
+      const input=await body(req),connectionId=input.connectionId,model=input.modelId??input.model;
       if(probeBusy||[...matches.values()].some(m=>m.busy||m.running))return json(res,409,{error:'Wait for the running request before probing'});
-      probeBusy=true;try {return json(res,200,await probeModel(model));}finally{probeBusy=false;}
+      probeBusy=true;try {
+        const result=connectionId?await probeConnection(connectionId,model,{targets:input.targets,refresh:input.refresh}):await probeModel(model);
+        return json(res,200,publicProbeResult(result));
+      }finally{probeBusy=false;}
     }
     if(req.method==='GET'&&path==='/api/models') {
-      const response=await fetch(`${process.env.LLM_BASE_URL??'http://localhost:8082'}/v1/models`,{signal:AbortSignal.timeout(10000)});
-      if(!response.ok) throw Error(`Model server HTTP ${response.status}`);
-      const data=await response.json();
-      return json(res,200,{models:data.data.map(m=>({id:m.id,status:m.status?.value,architecture:m.architecture}))});
+      const connectionId=url.searchParams.get('connectionId')??'local-llamacpp',profile=connectionProfile(connectionId);
+      try {
+        const data=await getModels(profile),models=Array.isArray(data.data)?data.data.map(m=>({id:m.id,status:m.status?.value,architecture:m.architecture})):[];
+        return json(res,200,{connectionId,available:true,models});
+      } catch(e) {
+        if(e instanceof TransportError||e.code==='unsupported'||e.code==='http'||e.code==='connection'||e.code==='timeout')return json(res,200,{connectionId,available:false,models:[],error:'Model discovery is unavailable; enter a model ID manually.'});
+        throw e;
+      }
     }
     if(req.method==='GET'&&path==='/api/runs') return json(res,200,await listRuns());
     const replay=path.match(/^\/api\/runs\/([a-zA-Z0-9_-]+)$/);
@@ -42,6 +60,11 @@ const server=createServer(async(req,res)=>{
       const options=await body(req);
       if(probeBusy||[...matches.values()].some(m=>m.busy||m.running)) return json(res,409,{error:'Wait for the running decision before starting another match'});
       delete options.initialState;
+      if(Array.isArray(options.players))options.players=options.players.map(player=>{
+        const allowed=['type','connectionId','modelId','model','observation','preview','transitions','maxTokens','timeoutMs','temperature','thinking','decisionTokens','maxCalls','requestIntervalMs','responseFormat','responseParsing'];
+        return Object.fromEntries(allowed.filter(key=>Object.hasOwn(player,key)).map(key=>[key,player[key]]));
+      });
+      delete options.capabilitySnapshots;delete options.preflightCapabilities;delete options.baseUrl;
       if(options.parent) {
         const records=await readRun(options.parent.id),index=options.parent.index;
         if(!Number.isInteger(index)||index<0||index>records.filter(r=>r.type==='decision').length) throw Error('Invalid replay position');

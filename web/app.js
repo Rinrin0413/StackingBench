@@ -4,13 +4,20 @@ const isAgentPlayer=type=>['codex','agy'].includes(type);
 const agentName=type=>type==='agy'?'Antigravity CLI (agy)':'Codex';
 const labels={agy:'Antigravity CLI (agy)',codex:'Codex · このセッション',human:'人間（あなた）',search:'探索 bot',llm:'LLM · 試し読みなし','llm-preview':'LLM · 試し読みあり'};
 let current=null,liveId=null,frame=0,follow=true,animation=0,noticeTimer,savedRuns=[],draft=null,submitting=false;
+let connectionProfiles=[];
+function connectionFor(config) {return connectionProfiles.find(connection=>connection.id===config?.connectionId);}
+function selectedModel(key) {return $(`model-id-${key}`).value.trim()||$(`model-${key}`).value;}
+function selectedConnection(key) {return $(`connection-${key}`).value;}
 function modelLabel(config,execution) {
   if(isAgentPlayer(config.type)) {
     const model=execution?execution.model:config.agentModel,effort=execution?execution.reasoningEffort:config.reasoningEffort;
     if(config.type==='agy')return `Antigravity CLI (agy) · ${model??'モデル未記録'}（申告情報）`;
     return `Codex · ${model??'モデル未記録'} / ${effort?effort[0].toUpperCase()+effort.slice(1):'推論レベル未記録'}（申告情報）`;
   }
-  return config.type==='human'?'ブラウザ操作':config.type==='search'?'モデル不使用（固定評価）':`${config.provider==='typesafe'?'TypeSafe · ':config.provider==='sakura'?'さくらのAI Engine · ':''}${config.model??'モデル名の記録なし'}`;}
+  if(config.type==='human')return 'ブラウザ操作';
+  if(config.type==='search')return 'モデル不使用（固定評価）';
+  const connection=connectionFor(config),label=connection?.label??(config.provider==='typesafe'?'TypeSafe · Jev':config.provider==='sakura'?'さくらのAI Engine':'接続不明');
+  return `${label} · ${config.modelId??config.model??'モデル名の記録なし'}`;}
 function savedIdentity() {
   const run=savedRuns.find(r=>r.id===$('saved-runs').value),container=$('saved-models');
   container.replaceChildren();container.hidden=!run;
@@ -153,7 +160,7 @@ document.addEventListener('keydown',catchErrors(async e=>{
   if(e.repeat&&!['L','R','D'].includes(op))return;
   await humanInput(op);
 }));
-function player(key) {return {type:$(`type-${key}`).value,...($(`type-${key}`).value==='codex'?{agentModel:$(`codex-model-${key}`).value,reasoningEffort:$(`codex-effort-${key}`).value}:{}),...($(`type-${key}`).value==='agy'?{agentModel:$(`agy-model-${key}`).value}:{}),preview:$('codex-preview').value==='true',model:$(`model-${key}`).value,observation:$('observation').value,transitions:Number($('transitions').value),maxTokens:Number($('tokens').value),
+function player(key) {const type=$(`type-${key}`).value;return {type,...(['llm','llm-preview'].includes(type)?{connectionId:selectedConnection(key),modelId:selectedModel(key),model:selectedModel(key)}:{}),... (type==='codex'?{agentModel:$(`codex-model-${key}`).value,reasoningEffort:$(`codex-effort-${key}`).value}:{}),... (type==='agy'?{agentModel:$(`agy-model-${key}`).value}:{}),preview:$('codex-preview').value==='true',observation:$('observation').value,transitions:Number($('transitions').value),maxTokens:Number($('tokens').value),
   timeoutMs:Number($('timeout').value)*1000,temperature:Number($('temperature').value),thinking:$('thinking').value,decisionTokens:Number($('decision-tokens').value),maxCalls:Number($('max-calls').value),requestIntervalMs:Number($('request-interval').value)*1000};}
 async function create(parent) {
   current=await api('/api/matches',{players:[player('a'),player('b')],seeds:[Number($('seed-a').value),Number($('seed-b').value)],first:Number($('first').value),maxLocks:Number($('max-locks').value),...(parent?{parent}:{})});
@@ -185,21 +192,37 @@ $('open-run').onclick=catchErrors(async()=>{
 $('probe').onclick=catchErrors(async()=>{
   $('probe').disabled=true;$('connection').textContent='生成の疎通確認中…';
   try {const key=['a','b'].find(k=>$(`type-${k}`).value.startsWith('llm'));if(!key)throw Error('接続確認する LLM を選択してください');const model=$(`model-${key}`).value;
-    const result=await api('/api/probe',{model});$('connection').textContent=result.ok?'生成の疎通確認成功':'疎通確認失敗';$('connection-dot').classList.toggle('online',result.ok);
-    notice(result.ok?`${result.model}: JSON応答を確認しました。${(result.elapsedMs/1000).toFixed(1)}秒。`:result.error??'JSON応答を確認できませんでした');
+    const result=await api('/api/probe',{connectionId:selectedConnection(key),modelId:selectedModel(key)});$('connection').textContent=result.ok?'生成の疎通確認成功':'疎通確認失敗';$('connection-dot').classList.toggle('online',result.ok);
+    notice(result.ok?`${result.modelId??result.model}: 生成能力を確認しました。`:result.error??'生成能力を確認できませんでした');
   } finally {$('probe').disabled=false;}
 });
-for(const key of ['a','b'])$(`type-${key}`).onchange=()=>{const unused=['search','human','codex','agy'].includes($(`type-${key}`).value);$(`agy-identity-${key}`).hidden=$(`type-${key}`).value!=='agy';$(`codex-identity-${key}`).hidden=$(`type-${key}`).value!=='codex';$(`model-${key}`).parentElement.hidden=$(`type-${key}`).value==='agy';$(`model-${key}`).disabled=unused;$(`model-${key}`).parentElement.classList.toggle('dim',unused);render();};
-for(const key of ['a','b']) {
-  const updateType=$(`type-${key}`).onchange;
-  const update=()=>{
-    const jev=$(`model-${key}`).value==='jev-latest';
-    const preview=Array.from($(`type-${key}`).options).find(o=>o.value==='llm-preview');
-    preview.disabled=jev;
-    if(jev&&$(`type-${key}`).value==='llm-preview')$(`type-${key}`).value='llm';
-    updateType();
-  };
-  $(`model-${key}`).onchange=update;$(`type-${key}`).onchange=update;
+function populateModels(key,models=[]) {
+  const select=$(`model-${key}`),previous=selectedModel(key);select.replaceChildren();
+  const unique=[...new Set(models.filter(Boolean))];
+  if(!unique.length)select.append(new Option('モデル ID を入力…',''));
+  else for(const id of unique)select.append(new Option(id,id));
+  const input=$(`model-id-${key}`);input.value=previous&&!unique.includes(previous)?previous:'';if(unique.includes(previous))select.value=previous;
 }
-await catchErrors(async()=>{const config=await api('/api/config');for(const key of ['a','b']){for(const id of config.models)$(`model-${key}`).append(new Option(`${id==='jev-latest'?'TypeSafe · Jev（試し読みなし） · ':config.sakuraModels?.includes(id)?'さくら · ':''}${id}`,id));$(`type-${key}`).onchange();}await refresh();const saved=sessionStorage.getItem('stackingbench-live');if(saved){try{current=await api(`/api/matches/${saved}`);liveId=saved;frame=current.records.length;}catch{sessionStorage.removeItem('stackingbench-live');}}render();})();
+async function loadConnectionModels(key) {
+  const profile=connectionFor({connectionId:selectedConnection(key)});populateModels(key,profile?.models??(selectedConnection(key)==='local-llamacpp'?['Qwen3.6-35B-A3B_UD-Q4_K_XL_128K-ctx_fast','Gemma-4-26B-A4B_UD-Q4_K_XL_128K-ctx_fast','Gemma-4-E2B_UD_Q4_K_XL_fast']:[]));
+  if(profile&&!profile.models?.length&&selectedConnection(key)!=='local-llamacpp')try {const result=await api(`/api/models?connectionId=${encodeURIComponent(profile.id)}`);populateModels(key,result.models?.map(model=>model.id)??[]);} catch {/* Manual model entry remains available. */}
+}
+for(const key of ['a','b']) {
+  const update=()=>{
+    const type=$(`type-${key}`).value,unused=['search','human','codex','agy'].includes(type),profile=connectionFor({connectionId:selectedConnection(key)});
+    $('agy-identity-'+key).hidden=type!=='agy';$('codex-identity-'+key).hidden=type!=='codex';
+    $(`connection-${key}`).parentElement.hidden=unused;$(`model-${key}`).parentElement.hidden=type==='agy';$(`model-id-${key}`).disabled=unused;$(`model-${key}`).disabled=unused;
+    $(`connection-${key}`).parentElement.classList.toggle('dim',unused);$(`model-${key}`).parentElement.classList.toggle('dim',unused);
+    const preview=Array.from($(`type-${key}`).options).find(o=>o.value==='llm-preview'),jev=profile?.protocol==='typesafe-jev-choice';
+    preview.disabled=jev;if(jev&&type==='llm-preview')$(`type-${key}`).value='llm';
+    render();
+  };
+  $(`type-${key}`).onchange=update;$(`connection-${key}`).onchange=catchErrors(async()=>{await loadConnectionModels(key);update();});
+  $(`model-${key}`).onchange=()=>{$(`model-id-${key}`).value='';update();};$(`model-id-${key}`).oninput=update;
+}
+await catchErrors(async()=>{const config=await api('/api/config');connectionProfiles=config.connections??[];for(const key of ['a','b']){
+  const select=$(`connection-${key}`);select.replaceChildren();for(const connection of connectionProfiles)select.append(new Option(`${connection.label}${connection.configured?'':'（未設定）'}`,connection.id));
+  select.value=connectionProfiles.find(connection=>connection.id==='local-llamacpp')?.id??connectionProfiles[0]?.id??'';
+  await loadConnectionModels(key);$(`type-${key}`).onchange();
+}await refresh();const saved=sessionStorage.getItem('stackingbench-live');if(saved){try{current=await api(`/api/matches/${saved}`);liveId=saved;frame=current.records.length;}catch{sessionStorage.removeItem('stackingbench-live');}}render();})();
 setInterval(catchErrors(async()=>{if(!liveId||!current?.busy&&!current?.running&&!(current?.hasAgent&&current.state.status==='playing'))return;const id=liveId,previousCount=current.records.length,wasHuman=!!current.human;const snapshot=await api(`/api/matches/${id}`);if(liveId!==id||submitting||snapshot.records.length<current.records.length)return;current=snapshot;if(follow)frame=current.records.length;render();if(current.human&&follow&&!wasHuman)focusBoard();if(!current.busy&&!current.running&&current.records.length!==previousCount)await refresh();}),1500);
