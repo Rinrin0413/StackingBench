@@ -1,7 +1,7 @@
 import {writeFile,mkdir} from 'node:fs/promises';
 import {readRun,RUNS,hashState} from '../src/match.js';
 import {decide,playerConfig,DEFAULT_MODEL} from '../src/players.js';
-import {probeConnection} from '../src/probe.js';
+import {assertCapabilitySelection,capabilityTargetsForConfig,ensureCapabilitySnapshot} from '../src/capabilities.js';
 import {applyMove,createGame} from '../src/engine.js';
 const args=process.argv.slice(2),option=(name,fallback)=>{const i=args.indexOf(`--${name}`);return i<0?fallback:args[i+1];};
 const run=option('run',null),index=Number(option('index','0'));
@@ -17,7 +17,10 @@ for(const type of ['llm','llm-preview','search']) {
     maxTokens:Number(option('max-tokens','2048')),decisionTokens:Number(option('decision-tokens','8192')),timeoutMs:Number(option('timeout-ms','120000')),maxCalls:Number(option('max-calls','34'))});
   console.log(`Comparing ${type} from ${report.initialHash}`);
   try {
-    if((args.includes('--probe')||args.includes('--preflight'))&&['llm','llm-preview'].includes(config.type)) {const result=await probeConnection(config.connectionId,config.modelId,{refresh:true});if(!result.ok)throw Error(result.error);config=playerConfig({...config,capabilitySnapshot:result.snapshot});}
+    if(['llm','llm-preview'].includes(config.type)) {
+      const snapshot=await ensureCapabilitySnapshot(config.connection,config.modelId,{refresh:args.includes('--probe')||args.includes('--preflight'),targets:capabilityTargetsForConfig(config),timeoutMs:config.timeoutMs,routingPolicy:config.routingPolicy});
+      config=playerConfig({...config,capabilitySnapshot:snapshot});assertCapabilitySelection(config,config.connection,snapshot,{requireSupported:true});
+    }
     const decision=await decide(state,config,{baseUrl:process.env.LLM_BASE_URL??'http://localhost:8082'});report.results.push({config,...decision,afterState:applyMove(state,decision.move).state});
   }
   catch(e) {report.results.push({config,error:{code:e.code,message:e.message,outcome:e.outcome,detail:e.detail}});}

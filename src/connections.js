@@ -18,7 +18,7 @@ const ENV_NAME=/^[A-Z][A-Z0-9_]*$/;
 const HEADER_NAME=/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 const BLOCKED_STATIC_HEADERS=new Set(['authorization','proxy-authorization','cookie','set-cookie','x-api-key','api-key']);
 const BLOCKED_REQUEST_KEYS=new Set(['model','modelid','messages','temperature','maxtokens','maxcompletiontokens','tokenlimit','stream','responseformat','n','stop','tools','toolchoice','seed','logprobs','toplogprobs']);
-const CAPABILITY_FEATURES=new Set(['basicText','usage','jsonObject','jsonSchema','reasoning']);
+const CAPABILITY_FEATURES=new Set(['basicText','choice','usage','jsonObject','jsonSchema','reasoning']);
 const REASONING_WIRES=new Set(['chat_template_kwargs','reasoning_effort']);
 const JSON_SCHEMA_WIRES=new Set(['json_schema','json_object-schema']);
 const DEFAULT_CONFIG_PATH=resolve(process.env.STACKINGBENCH_CONNECTIONS??'config/connections.json');
@@ -70,8 +70,6 @@ function normalizeCredential(input,id) {
   }
   if(type==='header-env') {
     if(!HEADER_NAME.test(input.header??'')||!ENV_NAME.test(input.env??''))fail(`Invalid credential header for ${id}`);
-    const lower=input.header.toLowerCase();
-    if(BLOCKED_STATIC_HEADERS.has(lower))fail(`Credential header must not be a blocked header for ${id}`);
     return {type,header:input.header,env:input.env};
   }
   fail(`Unknown credential type for ${id}`);
@@ -179,10 +177,10 @@ function builtinProfiles() {
   return [
     normalizeProfile({id:'local-llamacpp',label:'Local OpenAI-compatible',protocol:OPENAI_CHAT_PROTOCOL,baseUrl:local,legacyBaseUrl:local.replace(/\/v1$/,''),legacyProvider:'llamacpp',publicEndpoint:false,publicPreset:true,capabilityDefaults:{basicText:true,reasoningWire:'chat_template_kwargs'}}, {builtin:true}),
     normalizeProfile({id:'sakura-ai',label:'Sakura AI Engine',protocol:OPENAI_CHAT_PROTOCOL,baseUrl:`${SAKURA_BASE}/v1`,legacyBaseUrl:SAKURA_BASE,legacyProvider:'sakura',models:SAKURA_MODELS,publicEndpoint:true,publicPreset:true,credential:{type:'bearer-env',env:'SAKURA_AI_API_KEY'},capabilityDefaults:{basicText:true,jsonObject:false,jsonSchema:false,reasoningWire:'chat_template_kwargs'},pricing:{currency:'JPY'}},{builtin:true}),
-    normalizeProfile({id:'openrouter',label:'OpenRouter',protocol:OPENAI_CHAT_PROTOCOL,baseUrl:'https://openrouter.ai/api/v1',legacyProvider:'openai-compatible',publicEndpoint:true,publicPreset:true,credential:{type:'bearer-env',env:'OPENROUTER_API_KEY'},staticHeaders:{'X-OpenRouter-Metadata':'enabled'},capabilityDefaults:{basicText:true},models:[]},{builtin:true}),
+    normalizeProfile({id:'openrouter',label:'OpenRouter',protocol:OPENAI_CHAT_PROTOCOL,baseUrl:'https://openrouter.ai/api/v1',legacyProvider:'openai-compatible',publicEndpoint:true,publicPreset:true,credential:{type:'bearer-env',env:'OPENROUTER_API_KEY'},staticHeaders:{'X-OpenRouter-Metadata':'enabled'},routingPolicy:{allow_fallbacks:false},capabilityDefaults:{basicText:true},models:[]},{builtin:true}),
     normalizeProfile({id:'groq',label:'Groq',protocol:OPENAI_CHAT_PROTOCOL,baseUrl:'https://api.groq.com/openai/v1',legacyProvider:'openai-compatible',publicEndpoint:true,publicPreset:true,credential:{type:'bearer-env',env:'GROQ_API_KEY'},capabilityDefaults:{basicText:true},models:[]},{builtin:true}),
     normalizeProfile({id:'cerebras',label:'Cerebras',protocol:OPENAI_CHAT_PROTOCOL,baseUrl:'https://api.cerebras.ai/v1',legacyProvider:'openai-compatible',publicEndpoint:true,publicPreset:true,credential:{type:'bearer-env',env:'CEREBRAS_API_KEY'},capabilityDefaults:{basicText:true},models:[]},{builtin:true}),
-    normalizeProfile({id:'typesafe-jev',label:'TypeSafe · Jev',protocol:TYPESAFE_PROTOCOL,baseUrl:TYPESAFE_BASE,legacyBaseUrl:TYPESAFE_BASE,legacyProvider:'typesafe',models:[TYPESAFE_MODEL],publicEndpoint:false,publicPreset:true,credential:{type:'bearer-env',env:'TYPESAFE_API_KEY'},capabilityDefaults:{basicText:true,usage:true},},{builtin:true})
+    normalizeProfile({id:'typesafe-jev',label:'TypeSafe · Jev',protocol:TYPESAFE_PROTOCOL,baseUrl:TYPESAFE_BASE,legacyBaseUrl:TYPESAFE_BASE,legacyProvider:'typesafe',models:[TYPESAFE_MODEL],publicEndpoint:false,publicPreset:true,credential:{type:'bearer-env',env:'TYPESAFE_API_KEY'},capabilityDefaults:{choice:true,usage:true},},{builtin:true})
   ];
 }
 

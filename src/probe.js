@@ -39,12 +39,13 @@ export async function probeModel(model,{thinking='server-default',maxTokens=2048
 // counters, traces, or decision usage totals.
 export async function probeConnection(connectionId,modelId,options={}) {
   const connection=connectionProfile(connectionId),refresh=options.refresh===true;
+  const primaryTarget=connection.protocol==='typesafe-jev-choice'?'choice':'basicText';
   if(!refresh&&!options.transport) {
     const cached=await cachedCapability(connection,modelId,{cachePath:options.cachePath,ttlMs:options.ttlMs});
-    if(cached) {const features=cached.features;return {ok:features.basicText?.status==='supported',connectionId,modelId,protocol:connection.protocol,snapshot:cached,recordFile:null,features,error:features.basicText?.status==='supported'?null:'Basic text generation was not verified',cached:true};}
+    if(cached) {const features=cached.features;return {ok:features[primaryTarget]?.status==='supported',connectionId,modelId,protocol:connection.protocol,snapshot:cached,recordFile:null,features,error:features[primaryTarget]?.status==='supported'?null:`${primaryTarget} was not verified`,cached:true};}
   }
   const result=await probeConnectionModel(connection,modelId,{...options,targets:options.targets??CAPABILITY_TARGETS});
   const features=result.snapshot.features;
-  return {ok:features.basicText?.status==='supported',connectionId,modelId,protocol:connection.protocol,snapshot:result.snapshot,
-    recordFile:result.recordFile,features,error:features.basicText?.status==='supported'?null:'Basic text generation was not verified',cached:false};
+  return {ok:features[primaryTarget]?.status==='supported',connectionId,modelId,protocol:connection.protocol,snapshot:result.snapshot,
+    recordFile:result.recordFile,features,error:features[primaryTarget]?.status==='supported'?null:`${primaryTarget} was not verified`,cached:false};
 }

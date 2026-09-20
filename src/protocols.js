@@ -5,7 +5,7 @@ const STANDARD_FIELDS=new Set(['model','messages','temperature','max_tokens','ma
 export function portableActionSchema({preview=false}={}) {
   const properties={action:{type:'string',enum:['choose','preview']},move:{type:'string'}};
   const required=['action','move'];
-  if(preview) properties.node={type:'string'};
+  if(preview) {properties.node={type:'string'};required.push('node');}
   // Optional memo/reason fields deliberately stay out of the strict wire
   // schema. The StackingBench parser still accepts and records them when a
   // provider returns them, so this is a dialect projection, not a contract
@@ -15,7 +15,7 @@ export function portableActionSchema({preview=false}={}) {
 
 function clone(value) {return value===undefined?undefined:structuredClone(value);}
 
-function mergeExtensions(body,config) {
+export function applyRequestExtensions(body,config) {
   const profile=config.connection;
   if(!profile)return body;
   for(const [key,value] of Object.entries(profile.requestDefaults??{})) {
@@ -77,7 +77,7 @@ export function buildChatRequest(config,messages,actionSchema,availableTokens) {
   const responseFormat=responseFormatFor(config,actionSchema);
   if(responseFormat)body.response_format=responseFormat;
   Object.assign(body,reasoningParameters(config));
-  return mergeExtensions(body,config);
+  return applyRequestExtensions(body,config);
 }
 
 export function buildTypeSafeRequest(config,game,observation,instructions,criteria) {

@@ -68,7 +68,7 @@ LLM プレイヤー（`llm` / `llm-preview`）は、ローカル推論サーバ�
   TypeSafe の Jev Choice プリミティブを用いた合法手選択に対応しています。環境変数 `TYPESAFE_API_KEY` を設定し、プレイヤーを「LLM · 試し読みなし」、モデルを「TypeSafe · Jev」に設定してください。接続仕様は [docs/typesafe.md](docs/typesafe.md) を参照してください。
 
 - **汎用 OpenAI-compatible 接続**
-  `connectionId` と `modelId` を分けて扱います。OpenRouter、Groq、Cerebras は preset として利用でき、任意の OpenAI-compatible Chat Completions endpoint は `config/connections.json` に登録できます。接続の詳細は [docs/connections.md](docs/connections.md) を参照してください。OpenRouter は `OPENROUTER_API_KEY`、Groq は `GROQ_API_KEY`、Cerebras は `CEREBRAS_API_KEY` をサーバー側だけに設定します。
+  `connectionId` と `modelId` を分けて扱います。OpenRouter、Groq、Cerebras は preset として利用でき、任意の OpenAI-compatible Chat Completions endpoint は `config/connections.example.json` を Git 対象外の `config/connections.json` にコピーして登録できます。接続の詳細は [docs/connections.md](docs/connections.md) を参照してください。OpenRouter は `OPENROUTER_API_KEY`、Groq は `GROQ_API_KEY`、Cerebras は `CEREBRAS_API_KEY` をサーバー側だけに設定します。
 
 ### コーディングエージェント セッションとの対戦
 
@@ -119,7 +119,7 @@ pnpm test
 pnpm run check
 ```
 
-生成上限2048は**応答ごと**、全判断の生成予算8192、最大34往復、応答待ち120秒が初期値です。試し読み予算は1判断32遷移。UI の詳細設定で変更できます。CLI は `--max-tokens` / `--transitions` も利用できます。`--thinking off` は接続 profile が宣言した wire mapping で送られ、ローカル/Sakura では `chat_template_kwargs` を使います。未確認の generic connection は provider-specific reasoning parameter を推測して送らず、wire mapping の明示設定と、必要に応じた acceptance probe が必要です。既定設定と混ぜず、別条件として集計してください。
+生成上限2048は**応答ごと**、全判断の生成予算8192、最大34往復、応答待ち120秒が初期値です。試し読み予算は1判断32遷移。UI の詳細設定で変更できます。CLI は `--max-tokens` / `--transitions` も利用できます。未確認または期限切れの LLM 条件は開始前に必要 capability を自動 probe し、採用 snapshot を固定します。`--thinking off` は接続 profile が宣言した wire mapping で送られ、ローカル/Sakura では `chat_template_kwargs` を使います。未確認の generic connection は provider-specific reasoning parameter を推測して送らず、wire mapping の明示設定と acceptance probe が必要です。既定設定と混ぜず、別条件として集計してください。
 
 初回の Qwen 検証では、サーバー既定の思考設定で2応答とも2048tokenに到達し、本文が空のまま打切られました。最初の接続確認には、明示的な思考無効設定か、用途に合わせた出力予算の見直しが必要です。詳細と実測値は [docs/validation.md](docs/validation.md) に保存します。
 

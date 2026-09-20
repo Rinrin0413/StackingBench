@@ -8,6 +8,7 @@ import {TYPESAFE_MODEL,SAKURA_MODELS} from './providers.js';
 import {probeModel,probeConnection} from './probe.js';
 import {connectionProfile,loadConnectionProfiles,publicConnection,configuredConnection} from './connections.js';
 import {getModels,TransportError} from './transport.js';
+import {modelMetadataSummary} from './capabilities.js';
 
 const port=Number(process.env.PORT??3210),host='127.0.0.1',matches=new Map();
 let probeBusy=false;
@@ -46,7 +47,7 @@ const server=createServer(async(req,res)=>{
     if(req.method==='GET'&&path==='/api/models') {
       const connectionId=url.searchParams.get('connectionId')??'local-llamacpp',profile=connectionProfile(connectionId);
       try {
-        const data=await getModels(profile),models=Array.isArray(data.data)?data.data.map(m=>({id:m.id,status:m.status?.value,architecture:m.architecture})):[];
+        const data=await getModels(profile),models=Array.isArray(data.data)?data.data.map(m=>({id:m.id,status:m.status?.value,architecture:m.architecture,...modelMetadataSummary(m)})):[];
         return json(res,200,{connectionId,available:true,models});
       } catch(e) {
         if(e instanceof TransportError||e.code==='unsupported'||e.code==='http'||e.code==='connection'||e.code==='timeout')return json(res,200,{connectionId,available:false,models:[],error:'Model discovery is unavailable; enter a model ID manually.'});
@@ -70,7 +71,10 @@ const server=createServer(async(req,res)=>{
         if(!Number.isInteger(index)||index<0||index>records.filter(r=>r.type==='decision').length) throw Error('Invalid replay position');
         options.initialState=index===0?records[0].initialState:records.filter(r=>r.type==='decision')[index-1].state;
       }
-      const match=await Match.create(options);matches.set(match.id,match);return json(res,201,match.snapshot());
+      probeBusy=true;
+      try {
+        const match=await Match.create({...options,preflightCapabilities:true});matches.set(match.id,match);return json(res,201,match.snapshot());
+      } finally {probeBusy=false;}
     }
     if(req.method==='GET'&&path==='/api/agent/matches')return json(res,200,[...matches.values()]
       .filter(m=>m.config.players.some(p=>isAgentPlayer(p.type))).map(m=>({...m.agentStatus(),players:m.config.players.map(p=>({type:p.type,model:p.model??null}))})));

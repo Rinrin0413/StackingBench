@@ -23,25 +23,36 @@ test('saved match replays each path to identical hashes and final summary',async
 test('same position branching keeps exact state and resets memos',async()=>{
   const game=createGame();const state=applyMove(game,legalMoves(game)[0]).state;
   for(const type of ['search','llm','llm-preview']) {
-    const m=await Match.create({initialState:state,players:[{type},{type}],parent:{id:'fixture',index:1}});
+    const m=await Match.create({initialState:state,players:[{type},{type}],parent:{id:'fixture',index:1},preflightCapabilities:false});
     assert.deepEqual(m.state,state);assert.deepEqual(m.memos,['','']);assert.equal(m.header.initialHash,hashState(state));await m.stop();
   }
 });
+test('unknown LLM conditions are probed before the run header is fixed',async()=>{
+  let calls=0;
+  const m=await Match.create({players:[{type:'llm'},{type:'human'}],capabilityCachePath:join(dir,'automatic-preflight.json'),probeTransport:async(base,request)=>{
+    calls++;assert.equal(base,'http://localhost:8082');assert.equal(request.model,'Qwen3.6-35B-A3B_UD-Q4_K_XL_128K-ctx_fast');
+    return {choices:[{message:{content:'{"ok":true}'},finish_reason:'stop'}],usage:{prompt_tokens:2,completion_tokens:1}};
+  }});
+  assert.equal(calls,3);
+  const snapshot=m.header.config.connections[0].capabilitySnapshot;
+  assert.equal(snapshot.source,'probe');assert.equal(snapshot.features.basicText.status,'supported');assert.equal(snapshot.features.usage.status,'supported');assert.equal(snapshot.features.jsonSchema.status,'supported');
+  assert.equal(snapshot.requestPolicyFingerprint.length,64);await m.stop();
+});
 test('HTTP failure is invalid, persists trace, preserves board, and is not a win',async()=>{
-  const m=await Match.create({players:[{type:'llm'},{}]});
+  const m=await Match.create({players:[{type:'llm'},{}],preflightCapabilities:false});
   const record=await m.step({transport:async()=>{throw new DecisionError('http','HTTP 503','invalid',{body:'unavailable'});}});
   assert.equal(m.state.status,'invalid');assert.equal(m.state.winner,null);assert.equal(m.state.locks,0);assert(!record.move);
   const records=await readRun(m.id);assert.equal(records[1].error.code,'http');assert.equal(records[1].trace.requests.length,1);
   assert.equal(records.at(-1).summary[0].completionTokens,null);assert.equal(records.at(-1).summary[0].usageMissing,1);
 });
 test('second invalid response forfeits and never substitutes a search move',async()=>{
-  const m=await Match.create({players:[{type:'llm'},{}]});
+  const m=await Match.create({players:[{type:'llm'},{}],preflightCapabilities:false});
   await m.step({transport:async()=>({choices:[{message:{content:'{}'},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:2}})});
   assert.equal(m.state.status,'forfeit');assert.equal(m.state.winner,1);assert.equal(m.state.locks,0);
   const end=(await readRun(m.id)).at(-1);assert.equal(end.summary[0].invalidResponses,2);assert.equal(end.summary[0].calls,2);
 });
 test('in-flight decision lock rejects concurrent requests',async()=>{
-  const m=await Match.create({players:[{type:'llm'},{}]});let release;
+  const m=await Match.create({players:[{type:'llm'},{}],preflightCapabilities:false});let release;
   const pending=m.step({transport:()=>new Promise(r=>{release=r;})});
   await assert.rejects(()=>m.step(),/already running/);
   const id=legalMoves(m.state)[0].id;
@@ -101,14 +112,14 @@ test('human snapshots omit future streams and opponent pieces even during oppone
   assert(m.state.players[0].pieceRng);assert(m.header.initialState.seeds);await m.stop();
 });
 test('manual injection into an LLM condition is rejected without a decision or fallback',async()=>{
-  const m=await Match.create({players:[{type:'llm'},{type:'human'}]});const before=hashState(m.state);
+  const m=await Match.create({players:[{type:'llm'},{type:'human'}],preflightCapabilities:false});const before=hashState(m.state);
   await assert.rejects(()=>m.step({moveId:'m0000',stateHash:before}),/requires a human/);
   assert.equal(m.records.length,0);assert.equal(hashState(m.state),before);await m.stop();
 });
 
 test('LLM opponent uses its configured protocol then yields to human input',async()=>{
   const initialState=createGame({first:1});initialState.remaining=1;
-  const m=await Match.create({initialState,players:[{type:'human'},{type:'llm-preview',model:'preview/gemma-4-31B-it'}]});
+  const m=await Match.create({initialState,players:[{type:'human'},{type:'llm-preview',model:'preview/gemma-4-31B-it'}],preflightCapabilities:false});
   const move=legalMoves(m.state).find(m=>!m.useHold);
   await m.step({transport:async(endpoint,body)=>{
     assert.equal(endpoint,'https://api.ai.sakura.ad.jp');assert.equal(body.model,'preview/gemma-4-31B-it');

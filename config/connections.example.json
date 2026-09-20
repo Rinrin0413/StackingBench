@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "connections": [
+    {
+      "id": "example-gateway",
+      "label": "Example OpenAI-compatible gateway",
+      "baseUrl": "http://localhost:8082/v1",
+      "protocol": "openai-chat-completions",
+      "credential": {
+        "type": "header-env",
+        "header": "X-API-Key",
+        "env": "EXAMPLE_GATEWAY_API_KEY"
+      },
+      "staticHeaders": {
+        "X-Client": "StackingBench"
+      },
+      "requestDefaults": {},
+      "capabilityDefaults": {}
+    }
+  ]
+}

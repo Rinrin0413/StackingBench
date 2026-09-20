@@ -8,7 +8,7 @@ import {createGame,clone,legalMoves,applyMove,publicMove,replayPath,pendingCount
 import {playerConfig,decide,DecisionError} from './players.js';
 import {endpointFor,pricingFor} from './providers.js';
 import {connectionProfile,capabilityDefaultsForModel,endpointIdentity,endpointFingerprint} from './connections.js';
-import {capabilityForConfig,assertCapabilitySelection,cachedCapability,ensureCapabilitySnapshot} from './capabilities.js';
+import {capabilityForConfig,assertCapabilitySelection,capabilityTargetsForConfig,ensureCapabilitySnapshot} from './capabilities.js';
 import {responseFormatPolicy} from './protocols.js';
 import {AgentTurn} from './agent.js';
 
@@ -57,25 +57,21 @@ export class Match {
     if(players.length!==2) throw Error('Two player configurations required');
     const initial=options.initialState?clone(options.initialState):createGame(options);
     if(initial.rules.version!==1||initial.status!=='playing') throw Error('Only active v1 positions can be resumed');
-    if(options.preflightCapabilities) {
+    const preflightCapabilities=options.preflightCapabilities!==false;
+    if(preflightCapabilities) {
       for(const [index,player] of players.entries()) {
         if(['search','human','codex','agy'].includes(player.type))continue;
-        const profile=player.connection??connectionProfile(player.connectionId),snapshot=await ensureCapabilitySnapshot(profile,player.modelId??player.model,{refresh:options.refreshCapabilities===true,
-          targets:options.probeTargets,timeoutMs:player.timeoutMs,transport:options.probeTransport??undefined,cachePath:options.capabilityCachePath});
+        if(player.capabilitySnapshot)continue;
+        const profile=player.connection??connectionProfile(player.connectionId),snapshot=await ensureCapabilitySnapshot(profile,player.modelId??player.model,{refresh:options.refreshCapabilities===true||options.useCapabilityCache===false,
+          targets:options.probeTargets??capabilityTargetsForConfig(player),timeoutMs:player.timeoutMs,transport:options.probeTransport??undefined,
+          cachePath:options.capabilityCachePath,routingPolicy:player.routingPolicy});
         players[index]=playerConfig({...player,capabilitySnapshot:snapshot});
-      }
-    }
-    if(options.useCapabilityCache!==false&&!options.preflightCapabilities) {
-      for(const [index,player] of players.entries()) {
-        if(['search','human','codex','agy'].includes(player.type)||player.capabilitySnapshot)continue;
-        const profile=player.connection??connectionProfile(player.connectionId),snapshot=await cachedCapability(profile,player.modelId??player.model,{cachePath:options.capabilityCachePath});
-        if(snapshot)players[index]=playerConfig({...player,capabilitySnapshot:snapshot});
       }
     }
     const connections=players.map(p=>{
       if(['search','human','codex','agy'].includes(p.type))return null;
       const profile=p.connection??connectionProfile(p.connectionId),snapshot=capabilityForConfig(p,profile);
-      if(options.preflightCapabilities||p.capabilitySnapshot)assertCapabilitySelection(p,profile,snapshot,{requireSupported:true});
+      if(preflightCapabilities||p.capabilitySnapshot)assertCapabilitySelection(p,profile,snapshot,{requireSupported:true});
       const modelId=p.modelId??p.model,capabilities=capabilityDefaultsForModel(profile,modelId);
       return {connectionId:profile.id,modelId,protocol:profile.protocol,endpointFingerprint:endpointFingerprint(profile),endpointIdentity:endpointIdentity(profile),
         capabilitySnapshot:snapshot,structuredOutput:{requested:p.responseFormat,parser:p.responseParsing,wire:responseFormatPolicy({...p,connection:profile})},reasoning:{policy:p.thinking,wire:capabilities.reasoningWire??null},
