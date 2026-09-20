@@ -114,14 +114,20 @@ export function parseAction(content,mode='strict') {
 export const ACTION_SCHEMA={type:'object',properties:{action:{type:'string',enum:['choose','preview']},move:{type:'string'},node:{type:'string'},memo:{type:'string'},reason:{type:'string'}},required:['action','move'],additionalProperties:false};
 export function systemPrompt(config,rules) {
   const session=isAgentPlayer(config.type),preview=config.type==='llm-preview'||session&&config.preview;
+  const capabilities=config.connection?capabilityDefaultsForModel(config.connection,config.modelId??config.model):{};
+  const portableStrictSchema=config.responseFormat==='schema'&&config.provider!=='llamacpp'&&config.connection?.id!=='local-llamacpp'&&capabilities.jsonSchemaWire!=='json_object-schema';
   const chooseContract=config.provider==='typesafe'
     ? 'Select the best root legal move through the supplied Choice criteria. Prioritize survival, avoid holes, and build line clears and attacks using visible NEXT.'
     : session
     ? 'Use the agent choose command with a JSON file: {"decisionId":"current decisionId","moveId":"root move ID","memo":"optional short plan for next decision (max 240 characters)","reason":"optional brief explanation (max 400 characters)"}.'
+    : portableStrictSchema&&preview
+    ? 'Return one JSON object: {"action":"choose","move":"root move ID","node":"root"}. The required node value for a final choose is always "root".'
+    : portableStrictSchema
+    ? 'Return one JSON object: {"action":"choose","move":"root move ID"}.'
     : 'Return one JSON object: {"action":"choose","move":"root move ID","memo":"optional short plan for next decision (max 240 characters)","reason":"optional brief explanation (max 400 characters)"}.';
   const previewContract=session
     ? 'Use the agent preview command with {"decisionId":"current decisionId","node":"root or prior node ID","moveId":"ID from that node","requestId":"unique preview ID"}.'
-    : 'You may first request the preview tool using {"action":"preview","node":"root or prior node ID","move":"ID from that node"}. If the response schema requires node on a final choose, use "node":"root"; it does not change the selected root move.';
+    : 'You may first request the preview tool using {"action":"preview","node":"root or prior node ID","move":"ID from that node"}.';
   return `You are a player in StackingBench, a turn-based falling-block duel. Win by making the opponent top out. Each player locks ${rules.locksPerTurn} pieces then yields. One decision locks one piece. HOLD does not consume a lock. SRS paths and game outcomes are computed by the engine. Coordinates and every board row are supplied in the observation. Opponent NEXT and all future garbage holes are private.\nRules: ${JSON.stringify(rules)}\nAttack arrays are indexed by cleared lines. A difficult clear is four lines or a line-clearing T-spin; repeated difficult clears add b2bBonus. A zero-line lock preserves B2B; a normal 1-3 line clear breaks it. REN starts at -1, increments on clear and resets on zero lines. Perfect clear adds perfectClear. Attack cancels your pending garbage FIFO, then sends the remainder. A zero-line lock raises all remaining pending garbage with unknown holes. After clearing and raising, cells in the first hiddenRows=4 rows lose. A blocked spawn also loses. At maxLocks the game draws.\nChoose only an ID from root legalMoves. Candidate spin is the engine's pre-clear classification; no candidate is ranked. ${chooseContract} Explanations are self-reports, not proof of internal reasoning. Your previous memo and last outcome appear in each fresh decision.\n${preview?`${previewContract} Tool replies contain a hypothetical observation and local legalMoves. A boundary stops expansion. Preview budget: ${config.transitions} state transitions. Final choose must name a ROOT move, never a deeper node's move. You need not use all previews.`:'No preview tools are available. Select directly from root legalMoves.'}`;
 }
 export function typesafeInstructions(rules) {

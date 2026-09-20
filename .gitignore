@@ -1,5 +1,6 @@
 runs/
 node_modules/
 .env
+config/connections.json
 *.tmp
 coverage/

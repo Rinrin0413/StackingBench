@@ -22,7 +22,7 @@ function effectiveRoutingPolicy(connection,routingPolicy) {return routingPolicy=
 export function capabilityConditionFingerprint(connection,modelId,{routingPolicy}={}) {
   return createHash('sha256').update(JSON.stringify(stableValue({connectionId:connection.id,modelId,protocol:connection.protocol,
     endpointFingerprint:endpointFingerprint(connection),staticHeaders:connection.staticHeaders,requestDefaults:connection.requestDefaults,
-    routingPolicy:effectiveRoutingPolicy(connection,routingPolicy)}))).digest('hex');
+    routingPolicy:effectiveRoutingPolicy(connection,routingPolicy),capabilityConfiguration:capabilityDefaultsForModel(connection,modelId)}))).digest('hex');
 }
 function capabilityKey(connection,modelId,{routingPolicy}={}) {
   return createHash('sha256').update(JSON.stringify([connection.id,modelId,capabilityConditionFingerprint(connection,modelId,{routingPolicy})])).digest('hex');

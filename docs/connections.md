@@ -37,7 +37,7 @@ LLM プレイヤーの条件はモデル名から自動推測せず、`connectio
 
 `/models` は optional です。取得できない connection でもモデル ID を手入力して使用できます。取得できた `supported_parameters` は capability hint として記録しますが、永続的な対応保証とは扱わず、選択した実行条件は probe で確認します。`POST /api/probe` は `connectionId` と `modelId` を受け取り、OpenAI-compatible では basic text、usage、JSON object、JSON schema、reasoning acceptance を別々に検証します。TypeSafe では protocol 固有の `choice` と usage だけを検証し、basic text、JSON output、reasoning は `not-applicable` とします。probe の結果は対局の token/call/score 集計には入りません。
 
-未確認または期限切れの `connectionId + modelId + request policy` は、対局開始前に選択された response/reasoning mode に必要な target を自動 probe します。probe cache の identity には endpoint fingerprint に加えて `requestDefaults`、routing policy、非秘密 static headers を含めるため、routing 条件を変えた cache は再利用しません。TTL は初期値 24 時間ですが、`STACKINGBENCH_PROBE_TTL_MS` で変更できる policy です。cache file の既定位置も policy であり、`STACKINGBENCH_CAPABILITIES` で変更できます。採用した snapshot は header に固定され、実行中の再 probe や mode fallback は行いません。
+未確認または期限切れの `connectionId + modelId + request policy` は、対局開始前に選択された response/reasoning mode に必要な target を自動 probe します。probe cache の identity には endpoint fingerprint に加えて `requestDefaults`、routing policy、非秘密 static headers、model に適用される capability/wire configuration を含めます。`jsonSchemaWire`、`reasoningWire`、`reasoningOffValue`、model override を含むこれらの条件を変えた cache は再利用しません。TTL は初期値 24 時間ですが、`STACKINGBENCH_PROBE_TTL_MS` で変更できる policy です。cache file の既定位置も policy であり、`STACKINGBENCH_CAPABILITIES` で変更できます。採用した snapshot は header に固定され、実行中の再 probe や mode fallback は行いません。
 
 ## OpenRouter routing とログ
 

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createGame,legalMoves} from '../src/engine.js';
-import {llmDecision,playerConfig,searchDecision,DecisionError} from '../src/players.js';
+import {llmDecision,playerConfig,searchDecision,systemPrompt,DecisionError} from '../src/players.js';
 const reply=(value,{finish='stop',usage={prompt_tokens:100,completion_tokens:20}}={})=>({choices:[{message:{content:typeof value==='string'?value:JSON.stringify(value)},finish_reason:finish}],usage});
 test('baseline deterministic selection, fixed budget and no live mutation',async()=>{
   const g=createGame(),config=playerConfig({transitions:12});const a=await searchDecision(g,config),b=await searchDecision(g,config);
@@ -22,6 +22,10 @@ test('preview protocol returns exact node and accepts only root selection',async
     const result=JSON.parse(body.messages.at(-1).content);assert.equal(result.tool,'preview');assert.equal(result.used,1);assert.equal(result.observation.totalLocks,1);
     return reply({action:'choose',move:id});
   }});assert.equal(d.metrics.calls,2);assert.equal(d.metrics.transitions,1);assert.equal(d.trace.previews.length,1);
+});
+test('strict schema preview prompt requires node root on final choose',()=>{
+  const config=playerConfig({type:'llm-preview',connectionId:'openrouter',modelId:'model-x',responseFormat:'schema'}),prompt=systemPrompt(config,createGame().rules);
+  assert(prompt.includes('{"action":"choose","move":"root move ID","node":"root"}'));assert(prompt.includes('required node value for a final choose is always "root"'));
 });
 test('one repair for malformed JSON, then forfeit with full trace',async()=>{
   let calls=0;const g=createGame();

@@ -43,6 +43,26 @@ test('probe requests and cache identity include request defaults and routing pol
   } finally {await rm(dir,{recursive:true,force:true});}
 });
 
+test('cache identity includes model capability overrides and wire configuration',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'stackingbench-wire-policy-')),file=join(dir,'connections.json'),cache=join(dir,'cache.json');
+  const profileConfig=({jsonSchemaWire='json_schema',jsonObject=true,reasoningWire='reasoning_effort',reasoningOffValue='none'}={})=>({connections:[{id:'wire-gateway',baseUrl:'https://wire.example/v1',capabilityDefaults:{jsonSchemaWire,reasoningWire,reasoningOffValue},capabilityOverrides:{'model-a':{jsonObject}}}]});
+  try {
+    await writeFile(file,JSON.stringify(profileConfig()));
+    const first=loadConnectionProfiles({path:file}).find(item=>item.id==='wire-gateway');
+    await probeConnectionModel(first,'model-a',{targets:['basicText'],cachePath:cache,transport:async()=>response('basicText')});
+    assert(await cachedCapability(first,'model-a',{cachePath:cache}));
+    await writeFile(file,JSON.stringify(profileConfig({jsonSchemaWire:'json_object-schema'})));
+    const changedWire=loadConnectionProfiles({path:file}).find(item=>item.id==='wire-gateway');
+    assert.equal(await cachedCapability(changedWire,'model-a',{cachePath:cache}),null);
+    await writeFile(file,JSON.stringify(profileConfig({reasoningWire:'chat_template_kwargs',reasoningOffValue:false})));
+    const changedReasoning=loadConnectionProfiles({path:file}).find(item=>item.id==='wire-gateway');
+    assert.equal(await cachedCapability(changedReasoning,'model-a',{cachePath:cache}),null);
+    await writeFile(file,JSON.stringify(profileConfig({jsonObject:false})));
+    const changedOverride=loadConnectionProfiles({path:file}).find(item=>item.id==='wire-gateway');
+    assert.equal(await cachedCapability(changedOverride,'model-a',{cachePath:cache}),null);
+  } finally {await rm(dir,{recursive:true,force:true});}
+});
+
 test('model capability overrides stay server-side and snapshots cannot cross connection identity',async()=>{
   const dir=await mkdtemp(join(tmpdir(),'stackingbench-capability-overrides-')),file=join(dir,'connections.json');
   try {
