@@ -6,4 +6,4 @@
 
 .agent-controls{padding:16px 25px;border-top:1px solid var(--border);background:#eef2f8}.agent-controls[hidden]{display:none}.agent-controls p{font-size:11px;line-height:1.8;margin:0 0 10px}.agent-controls label{max-width:500px}.agent-controls span{font-size:10px;color:#687c68;margin-left:12px}
 
-.model-label[hidden]{display:none}
+.connection-label[hidden],.model-label[hidden]{display:none}

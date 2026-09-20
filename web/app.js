@@ -209,10 +209,9 @@ async function loadConnectionModels(key) {
 }
 for(const key of ['a','b']) {
   const update=()=>{
-    const type=$(`type-${key}`).value,unused=['search','human','codex','agy'].includes(type),profile=connectionFor({connectionId:selectedConnection(key)});
+    const type=$(`type-${key}`).value,llm=['llm','llm-preview'].includes(type),profile=connectionFor({connectionId:selectedConnection(key)});
     $('agy-identity-'+key).hidden=type!=='agy';$('codex-identity-'+key).hidden=type!=='codex';
-    $(`connection-${key}`).parentElement.hidden=unused;$(`model-${key}`).parentElement.hidden=type==='agy';$(`model-id-${key}`).disabled=unused;$(`model-${key}`).disabled=unused;
-    $(`connection-${key}`).parentElement.classList.toggle('dim',unused);$(`model-${key}`).parentElement.classList.toggle('dim',unused);
+    $(`connection-${key}`).parentElement.hidden=!llm;$(`model-${key}`).parentElement.hidden=!llm;$(`model-id-${key}`).disabled=!llm;$(`model-${key}`).disabled=!llm;
     const preview=Array.from($(`type-${key}`).options).find(o=>o.value==='llm-preview'),jev=profile?.protocol==='typesafe-jev-choice';
     preview.disabled=jev;if(jev&&type==='llm-preview')$(`type-${key}`).value='llm';
     render();
