@@ -40,7 +40,7 @@ function render() {
     $(`turn-${key}`).textContent=active?`残り ${state.remaining} 固定`:'待機';
     $(`name-${key}`).textContent=labels[current?.header.config.players[i].type??$(`type-${key}`).value];
     const config=current?.header.config.players[i];
-    $(`recorded-model-${key}`).textContent=config?identityLabel(config,records.slice(0,frame).findLast(r=>r.actor===i&&r.execution)?.execution,library.metadata(current.id)?.players?.[i]):'対局作成後に使用モデルを表示';
+    $(`recorded-model-${key}`).textContent=config?identityLabel(config,records.slice(0,frame).findLast(r=>r.actor===i&&r.execution)?.execution,library.metadata(current.id)?.players?.[i],{showCorrection:false}):'対局作成後に使用モデルを表示';
   }
   $('lock-label').textContent=`${state?.locks??0} / ${state?.rules.maxLocks??280} LOCKS`;
   $('timeline').max=records.length;$('timeline').value=frame;$('frame').textContent=`${frame} / ${records.length}`;

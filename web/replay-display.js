@@ -5,11 +5,11 @@ export function identity(config,execution,override={}) {
   const original=execution??{model:['codex','agy'].includes(config.type)?config.agentModel:config.modelId??config.model,reasoningEffort:config.reasoningEffort};
   return {model:Object.hasOwn(override,'model')?override.model:original.model??null,reasoningEffort:Object.hasOwn(override,'reasoningEffort')?override.reasoningEffort:original.reasoningEffort??null};
 }
-export function identityLabel(config,execution,override={}) {
+export function identityLabel(config,execution,override={},{showCorrection=true}={}) {
   const name=playerNames[config.type]??config.type;
   if(['human','search'].includes(config.type))return name;
   const value=identity(config,execution,override);
-  const note=Object.keys(override).length?'（表示訂正）':['codex','agy'].includes(config.type)?'（申告情報）':'';
+  const note=Object.keys(override).length?(showCorrection?'（表示訂正）':''):['codex','agy'].includes(config.type)?'（申告情報）':'';
   return `${name} · ${value.model??'モデル未記録'} / ${value.reasoningEffort??'推論レベル未記録'}${note}`;
 }
 export function playerLabels(run,original=false) {
