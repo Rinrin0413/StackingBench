@@ -1,3 +1,4 @@
+import {readMetadata,patchMetadata} from './run-metadata.js';
 import {isAgentPlayer} from './agent-identity.js';
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
@@ -29,7 +30,7 @@ const server=createServer(async(req,res)=>{
     const allowedHosts=new Set([`localhost:${port}`,`${host}:${port}`]);
     if(!allowedHosts.has(req.headers.host)) return json(res,403,{error:'Local host required'});
     if(req.headers.origin&&!new Set([`http://localhost:${port}`,`http://${host}:${port}`]).has(req.headers.origin)) return json(res,403,{error:'Same origin required'});
-    if(req.method==='POST'&&!req.headers['content-type']?.startsWith('application/json')) return json(res,415,{error:'JSON required'});
+    if(['POST','PATCH'].includes(req.method)&&!req.headers['content-type']?.startsWith('application/json')) return json(res,415,{error:'JSON required'});
     const url=new URL(req.url,`http://${host}:${port}`),path=url.pathname;
     if(req.method==='GET'&&path==='/api/config') {
       const profiles=loadConnectionProfiles(),known=[DEFAULT_MODEL,'Gemma-4-26B-A4B_UD-Q4_K_XL_128K-ctx_fast',QUICK_MODEL,...SAKURA_MODELS,TYPESAFE_MODEL];
@@ -54,7 +55,21 @@ const server=createServer(async(req,res)=>{
         throw e;
       }
     }
-    if(req.method==='GET'&&path==='/api/runs') return json(res,200,await listRuns());
+    if(req.method==='GET'&&path==='/api/runs') {
+      const errors=[],trash=url.searchParams.get('trash')??'active';
+      if(!['active','trash','all'].includes(trash))return json(res,400,{error:'Invalid trash filter'});
+      const runs=await listRuns({trash,onError:e=>errors.push(e)});
+      for(const run of runs){const match=matches.get(run.id);run.active=!!match&&(match.busy||match.running||match.state.status==='playing');}
+      return json(res,200,url.searchParams.get('library')==='1'?{runs,errors}:runs);
+    }
+    const metadataRoute=path.match(/^\/api\/runs\/([a-zA-Z0-9_-]+)\/metadata$/);
+    if(metadataRoute&&['GET','PATCH'].includes(req.method)) {
+      const id=metadataRoute[1],records=await readRun(id);
+      if(req.method==='GET')return json(res,200,await readMetadata(id));
+      const input=await body(req),match=matches.get(id);
+      if(input.trashed===true&&match&&(match.busy||match.running||match.state.status==='playing'))return json(res,409,{error:'実行中・入力待ちの対局は停止してからゴミ箱へ移動してください'});
+      return json(res,200,await patchMetadata(id,input,records[0].config.players));
+    }
     const replay=path.match(/^\/api\/runs\/([a-zA-Z0-9_-]+)$/);
     if(req.method==='GET'&&replay) return json(res,200,await readRun(replay[1]));
     if(req.method==='POST'&&path==='/api/matches') {
@@ -120,7 +135,7 @@ const server=createServer(async(req,res)=>{
     }
     if(req.method==='GET') {
       if(path==='/engine.js') {res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8'});res.end(await readFile(new URL('./engine.js',import.meta.url)));return;}
-      const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/style.css':['style.css','text/css']};
+      const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/library.js':['library.js','text/javascript'],'/replay-display.js':['replay-display.js','text/javascript'],'/style.css':['style.css','text/css']};
       if(files[path]) {
         const [name,type]=files[path];res.writeHead(200,{'Content-Type':`${type}; charset=utf-8`,'X-Content-Type-Options':'nosniff',
           'Content-Security-Policy':"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'"});res.end(await readFile(web+name));return;

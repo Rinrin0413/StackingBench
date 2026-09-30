@@ -15,7 +15,7 @@
           <details class="settings"><summary>観測・生成・探索の設定</summary><label>Codex / Antigravity の試し読み<select id="codex-preview"><option value="true">あり（遷移予算内）</option><option value="false">なし</option></select></label><label>観測形式<select id="observation"><option value="text">文字 · JSON</option><option disabled>画像（今後対応）</option><option disabled>文字＋画像（今後対応）</option></select></label><div class="two-fields"><label>遷移 / 判断<input id="transitions" type="number" min="1" max="2048" value="32"></label><label>出力 / 応答<input id="tokens" type="number" min="32" max="32768" value="2048"></label></div><div class="two-fields"><label>待機上限 (秒)<input id="timeout" type="number" min="1" max="600" value="120"></label><label>Temperature<input id="temperature" type="number" min="0" max="2" step="0.1" value="0.2"></label></div><label>思考設定<select id="thinking"><option value="server-default">サーバー既定</option><option value="off">思考を無効にする</option></select></label><label>生成予算 / 判断<input id="decision-tokens" type="number" min="32" max="131072" value="8192"></label><label>API 要求間隔 (秒)<input id="request-interval" type="number" min="0" max="60" step="1" value="0"></label><label>最大 API 往復 / 判断<input id="max-calls" type="number" min="1" max="100" value="34"></label></details>
           <button class="primary wide" id="create" type="submit">新しい対局を作成 <span>→</span></button>
         </form>
-        <div class="saved"><div class="section-title"><h2>保存した対局</h2><button id="refresh" class="text-button" aria-label="保存対局を更新">↻</button></div><select id="saved-runs"><option value="">リプレイを選択</option></select><div id="saved-models" class="saved-models" hidden></div><button id="open-run" class="secondary wide">リプレイを開く</button></div>
+        <div class="saved"><div class="section-title"><h2>保存した対局</h2></div><p id="library-total">保存対局を読み込み中…</p><button id="show-library" class="secondary wide">リプレイライブラリを開く</button></div>
         <p class="aside-note">7固定で交代 / HOLD / NEXT 5<br>結果はローカルに自動保存されます。</p>
       </aside>
       <section class="arena">
@@ -41,5 +41,12 @@
     <div id="notice" role="status" aria-live="polite"></div>
     <footer><span>StackingBench</span></footer>
   </main>
+  <dialog id="replay-library" aria-labelledby="library-heading">
+    <div class="library-heading"><div><h2 id="library-heading">リプレイライブラリ</h2><p>対局を探す・振り返る・整理する</p></div><button id="library-close" class="secondary" aria-label="ライブラリを閉じる">閉じる ×</button></div>
+    <div class="library-tabs" aria-label="表示する対局"><button id="library-active" class="secondary" aria-pressed="true">保存した対局</button><button id="library-trash" class="secondary" aria-pressed="false">ゴミ箱</button><button id="library-refresh" class="text-button">更新 ↻</button></div>
+    <div class="library-filters"><label>検索<input id="library-search" type="search" placeholder="タイトル・モデル名・対局 ID"></label><label>結果<select id="library-result"><option value="">すべての結果</option value="active">進行中</option><option value="finished">終了</option><option value="forfeit">失格</option><option value="invalid">無効</option><option value="aborted">停止</option><option value="incomplete">未完了</option></select></label><label>並べ替え<select id="library-sort"><option value="newest">新しい順</option><option value="oldest">古い順</option><option value="title">タイトル順</option></select></label><label class="favorite-filter"><input id="library-favorite" type="checkbox">お気に入りのみ</label></div>
+    <p id="library-status" role="status" aria-live="polite"></p><p id="library-count"></p>
+    <div class="library-body"><section aria-label="対局一覧"><div id="library-list"></div><button id="library-more" class="secondary wide" hidden>さらに50件表示</button></section><section id="library-detail" tabindex="-1" aria-label="選択した対局の詳細"></section></div>
+  </dialog>
   <script type="module" src="/app.js"></script>
 </body></html>

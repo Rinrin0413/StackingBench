@@ -59,7 +59,7 @@ try {
   await cli(['choose',id,'--file','-'],{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,agentModel:'test-fixture'});
   await page.waitForFunction(()=>document.querySelector('#badge').textContent==='FINISHED');
   const final=await cli(['wait',id,'--timeout-ms','100']);assert.equal(final.status,'finished');
-  await page.click('#refresh');await page.selectOption('#saved-runs',id);await page.click('#open-run');
-  await page.waitForFunction(()=>document.querySelector('#badge').textContent==='REPLAY');assert.match(await page.textContent('#saved-models'),new RegExp(agentLabel));
+  await page.click('#show-library');await page.fill('#library-search',id);await page.locator('.run-card').first().click();await page.getByRole('button',{name:'リプレイを開く',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#badge').textContent==='REPLAY');assert.match(await page.textContent('#library-detail'),new RegExp(agentLabel));
   assert.deepEqual(errors,[]);console.log(` ${agentLabel} bridge fixture OK: ${id}; CLI, preview retry, wait, handoff, polling, replay, mobile`);
 } finally {await browser.close();}

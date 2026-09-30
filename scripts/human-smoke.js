@@ -43,9 +43,9 @@ try {
   const records=await page.evaluate(id=>fetch(`/api/runs/${id}`).then(r=>r.json()),id);
   assert.equal(records.at(-1).summary[0].locks,8);assert.equal(records.at(-1).summary[1].locks,7);
   assert.equal(records.at(-1).reason,'lock-limit');
-  await page.click('#refresh');await page.selectOption('#saved-runs',id);await page.click('#open-run');
+  await page.click('#show-library');await page.fill('#library-search',id);await page.locator('.run-card').first().click();await page.getByRole('button',{name:'リプレイを開く',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('#badge').textContent==='REPLAY');
-  assert.match(await page.textContent('#saved-models'),/人間/);assert(await page.isHidden('#human-controls'));
+  assert.match(await page.textContent('#library-detail'),/人間/);assert(await page.isHidden('#human-controls'));
   await page.click('#path');await page.waitForTimeout(1000);
   // Check touch controls on a small screen with a second human at Player B.
   await page.selectOption('#type-a','search');await page.selectOption('#type-b','human');await page.selectOption('#first','1');

@@ -37,7 +37,7 @@ try {
   assert.match(await page.textContent('#lock-label'),/^14 \/ 28/);
   await page.click('#step');await page.waitForFunction(()=>document.querySelector('#frame').textContent==='1 / 1');
   await page.click('#stop');await page.waitForFunction(()=>document.querySelector('#badge').textContent==='ABORTED');
-  await page.click('#refresh');await page.selectOption('#saved-runs',{index:1});await page.click('#open-run');
+  await page.click('#show-library');await page.locator('.run-card').first().click();await page.getByRole('button',{name:'リプレイを開く',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('#badge').textContent==='REPLAY');
   await page.setViewportSize({width:390,height:844});await page.screenshot({path:'runs/ui-mobile.png',fullPage:true});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile overflow');

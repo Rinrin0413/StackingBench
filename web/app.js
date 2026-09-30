@@ -1,30 +1,15 @@
+import {createLibrary} from '/library.js';
+import {identityLabel} from '/replay-display.js';
 import {SHAPES,cells,spawn,motion,fits,spinType} from '/engine.js';
 const $=id=>document.getElementById(id),colors={I:'#72cfdb',J:'#7498ec',L:'#e6b570',O:'#ded479',S:'#85c39a',T:'#b699d5',Z:'#dd8e91',G:'#6c8580'};
 const isAgentPlayer=type=>['codex','agy'].includes(type);
 const agentName=type=>type==='agy'?'Antigravity CLI (agy)':'Codex';
 const labels={agy:'Antigravity CLI (agy)',codex:'Codex · このセッション',human:'人間（あなた）',search:'探索 bot',llm:'LLM · 試し読みなし','llm-preview':'LLM · 試し読みあり'};
-let current=null,liveId=null,frame=0,follow=true,animation=0,noticeTimer,savedRuns=[],draft=null,submitting=false;
+let current=null,liveId=null,frame=0,follow=true,animation=0,noticeTimer,draft=null,submitting=false;
 let connectionProfiles=[];
 function connectionFor(config) {return connectionProfiles.find(connection=>connection.id===config?.connectionId);}
 function selectedModel(key) {return $(`model-id-${key}`).value.trim()||$(`model-${key}`).value;}
 function selectedConnection(key) {return $(`connection-${key}`).value;}
-function modelLabel(config,execution) {
-  if(isAgentPlayer(config.type)) {
-    const model=execution?execution.model:config.agentModel,effort=execution?execution.reasoningEffort:config.reasoningEffort;
-    if(config.type==='agy')return `Antigravity CLI (agy) · ${model??'モデル未記録'}（申告情報）`;
-    return `Codex · ${model??'モデル未記録'} / ${effort?effort[0].toUpperCase()+effort.slice(1):'推論レベル未記録'}（申告情報）`;
-  }
-  if(config.type==='human')return 'ブラウザ操作';
-  if(config.type==='search')return 'モデル不使用（固定評価）';
-  const connection=connectionFor(config),label=connection?.label??(config.provider==='typesafe'?'TypeSafe · Jev':config.provider==='sakura'?'さくらのAI Engine':'接続不明');
-  return `${label} · ${config.modelId??config.model??'モデル名の記録なし'}`;}
-function savedIdentity() {
-  const run=savedRuns.find(r=>r.id===$('saved-runs').value),container=$('saved-models');
-  container.replaceChildren();container.hidden=!run;
-  for(const [i,p] of (run?.players??[]).entries()) {
-    const line=document.createElement('p');line.textContent=`${i===0?'A':'B'} · ${labels[p.type]} — ${(run.executions?.[i]?.length?run.executions[i].map(e=>modelLabel(p,e)):[modelLabel(p)]).join(' / ')}`;container.append(line);
-  }
-}
 const empty=()=>Array.from({length:24},()=>Array(10).fill('.'));
 function notice(message) { $('notice').textContent=message;$('notice').style.display='block';clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>$('notice').style.display='none',9000); }
 async function api(path,data) {const r=await fetch(path,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const v=await r.json();if(!r.ok) throw Error(v.error??`HTTP ${r.status}`);return v;}
@@ -55,7 +40,7 @@ function render() {
     $(`turn-${key}`).textContent=active?`残り ${state.remaining} 固定`:'待機';
     $(`name-${key}`).textContent=labels[current?.header.config.players[i].type??$(`type-${key}`).value];
     const config=current?.header.config.players[i];
-    $(`recorded-model-${key}`).textContent=config?modelLabel(config,records.slice(0,frame).findLast(r=>r.actor===i&&r.execution)?.execution):'対局作成後に使用モデルを表示';
+    $(`recorded-model-${key}`).textContent=config?identityLabel(config,records.slice(0,frame).findLast(r=>r.actor===i&&r.execution)?.execution,library.metadata(current.id)?.players?.[i]):'対局作成後に使用モデルを表示';
   }
   $('lock-label').textContent=`${state?.locks??0} / ${state?.rules.maxLocks??280} LOCKS`;
   $('timeline').max=records.length;$('timeline').value=frame;$('frame').textContent=`${frame} / ${records.length}`;
@@ -66,7 +51,7 @@ function render() {
   $('fork').disabled=!state||state.status!=='playing'||current?.busy||current?.running;$('path').disabled=!record?.move||!!(liveId&&current?.human&&frame===records.length);
   $('prev').disabled=frame===0;$('next').disabled=frame===records.length;
   $('badge').textContent=!current?'READY':current.busy?'THINKING':!liveId||frame<records.length?'REPLAY':current.state.status==='playing'?(current.human?'YOUR TURN':current.agentWaiting?(current.header.config.players[current.state.active].type==='agy'?'AGY WAIT':'CODEX WAIT'):'LIVE'):current.state.status.toUpperCase();
-  $('match-label').textContent=current?`${current.header.config.players.map(p=>labels[p.type]).join(' vs ')}${frame<records.length?' · REPLAY':''}`:'対局を作成して開始';
+  $('match-label').textContent=current?`${library.metadata(current.id)?.title||current.header.config.players.map(p=>labels[p.type]).join(' vs ')}${frame<records.length?' · REPLAY':''}`:'対局を作成して開始';
   const end=current?.state;
   $('progress').textContent=current?.runtimeError?`保存/実行エラー: ${current.runtimeError}`:current?.stopRequested&&current.busy?'現在の判断後に停止します':current?.busy?'判断中 · 応答を待っています':end&&end.status!=='playing'?`${end.winner===null?'勝者なし':`Player ${end.winner===0?'A':'B'} 勝利`} / ${end.reason}`:current?.agentWaiting?`${agentName(current.header.config.players[current.state.active].type)} の入力を待っています`:current?.human?'あなたの番です · 7固定で交代':liveId?'次の判断を開始できます':'リプレイ操作 / 局面から比較';
   $('decision-label').textContent=record?`#${frame} · PLAYER ${record.actor===0?'A':'B'} · ${record.move?.id??record.error?.code}`:'';
@@ -154,7 +139,7 @@ async function humanInput(op) {
 for(const button of document.querySelectorAll('[data-input]'))button.onclick=catchErrors(async()=>{await humanInput(button.dataset.input);focusBoard();});
 $('human-latest').onclick=()=>{frame=current.records.length;follow=true;animation++;render();focusBoard();};
 document.addEventListener('keydown',catchErrors(async e=>{
-  if(!canInput()||e.ctrlKey||e.metaKey||e.altKey||e.target.closest('input,select,textarea,summary')||e.target.closest('button')&&!e.target.closest('#human-controls'))return;
+  if($('replay-library').open||!canInput()||e.ctrlKey||e.metaKey||e.altKey||e.target.closest('input,select,textarea,summary')||e.target.closest('button')&&!e.target.closest('#human-controls'))return;
   const op={ArrowLeft:'L',ArrowRight:'R',ArrowDown:'D',ArrowUp:'CW',KeyX:'CW',KeyZ:'CCW',KeyC:'HOLD',Space:'HD',KeyR:'RESET'}[e.code];
   if(!op)return;e.preventDefault();
   if(e.repeat&&!['L','R','D'].includes(op))return;
@@ -180,15 +165,12 @@ $('path').onclick=catchErrors(async()=>{
   for(const op of record.move.path){if(token!==animation)return;pos=motion(board,record.move.piece,pos,op);drawBoard(`board-${key}`,board,{piece:record.move.piece,cells:cells(record.move.piece,pos)});await new Promise(r=>setTimeout(r,100));}
   if(token===animation)render();
 });
-async function refresh(){savedRuns=await api('/api/runs');const selected=$('saved-runs').value;$('saved-runs').replaceChildren(new Option('リプレイを選択',''));for(const r of savedRuns){const matchup=r.players.map((p,i)=>isAgentPlayer(p.type)?(r.executions?.[i]?.length?r.executions[i].map(e=>modelLabel(p,e)).join(' / '):modelLabel(p)):['search','human'].includes(p.type)?labels[p.type]:`${p.model??'モデル不明'} (${labels[p.type]})`).join(' vs ');$('saved-runs').append(new Option(`${r.createdAt.slice(5,16).replace('T',' ')} · ${matchup} · ${r.locks}手 · ${r.status}`,r.id));}$('saved-runs').value=selected;savedIdentity();}
-$('saved-runs').onchange=savedIdentity;
-$('refresh').onclick=catchErrors(refresh);
-$('open-run').onclick=catchErrors(async()=>{
+const library=createLibrary({changed:()=>render(),openRun:async run=>{
   if(current?.busy||current?.running)throw Error('現在の判断を停止してからリプレイを開いてください');
-  const id=$('saved-runs').value;if(!id)return;
-  const all=await api(`/api/runs/${id}`),records=all.filter(r=>r.type==='decision'),end=all.findLast(r=>r.type==='end');
+  const id=run.id,all=await api(`/api/runs/${id}`),records=all.filter(r=>r.type==='decision'),end=all.findLast(r=>r.type==='end');
   current={id,header:all[0],records,state:end?.state??records.at(-1)?.state??all[0].initialState,summary:end?.summary};liveId=null;sessionStorage.removeItem('stackingbench-live');frame=records.length;follow=false;animation++;render();
-});
+}});
+async function refresh(){await library.refresh();}
 $('probe').onclick=catchErrors(async()=>{
   $('probe').disabled=true;$('connection').textContent='生成の疎通確認中…';
   try {const key=['a','b'].find(k=>$(`type-${k}`).value.startsWith('llm'));if(!key)throw Error('接続確認する LLM を選択してください');const model=$(`model-${key}`).value;

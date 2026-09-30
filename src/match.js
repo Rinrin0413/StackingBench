@@ -1,3 +1,4 @@
+import {readMetadata} from './run-metadata.js';
 import {isAgentPlayer} from './agent-identity.js';
 import {mkdir,appendFile,readFile,readdir} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
@@ -25,16 +26,20 @@ export async function readRun(id) {
   }
   return records;
 }
-export async function listRuns() {
+export async function listRuns({trash='active',onError=()=>{}}={}) {
   await mkdir(RUNS,{recursive:true});
   const entries=(await readdir(RUNS)).filter(n=>n.endsWith('.jsonl')).sort().reverse();
   const result=[];
-  for(const name of entries.slice(0,100)) {
-    const records=await readRun(name.slice(0,-6));
-    if(!records[0]) continue;
-    const end=records.findLast(r=>r.type==='end');
-    result.push({id:records[0].id,createdAt:records[0].createdAt,players:records[0].config.players,executions:[0,1].map(actor=>records.filter(r=>r.type==='decision'&&r.actor===actor&&r.execution).map(r=>r.execution).filter((e,i,a)=>a.findIndex(x=>JSON.stringify(x)===JSON.stringify(e))===i)),status:end?.status??'incomplete',
-      winner:end?.winner,locks:records.filter(r=>r.type==='decision'&&r.move).length});
+  for(const name of entries) {
+    try {
+      const records=await readRun(name.slice(0,-6));
+      if(!Array.isArray(records[0]?.config?.players)||records[0].config.players.length!==2||!records[0].config.players.every(p=>p&&typeof p.type==='string')||!Number.isFinite(Date.parse(records[0].createdAt))||records[0].id!==name.slice(0,-6)) throw Error('Invalid run header');
+      const metadata=await readMetadata(records[0].id);
+      if(trash!=='all'&&metadata.trashed!==(trash==='trash'))continue;
+      const end=records.findLast(r=>r.type==='end');
+      result.push({metadata,id:records[0].id,createdAt:records[0].createdAt,players:records[0].config.players,executions:[0,1].map(actor=>records.filter(r=>r.type==='decision'&&r.actor===actor&&r.execution).map(r=>r.execution).filter((e,i,a)=>a.findIndex(x=>JSON.stringify(x)===JSON.stringify(e))===i)),status:end?.status??'incomplete',
+        winner:end?.winner,locks:records.filter(r=>r.type==='decision'&&r.move).length});
+    } catch {onError({id:name.slice(0,-6),error:'対局または管理情報を読み込めませんでした'});}
   }
   return result;
 }
