@@ -132,8 +132,9 @@ test('LLM opponent uses its configured protocol then yields to human input',asyn
   assert.equal(m.records[1].metrics.calls,0);await m.stop();
 });
 
-test('Codex session waits, previews within a persistent budget, and logs reproducible moves',async()=>{
-  const m=await Match.create({maxLocks:2,players:[{type:'codex',transitions:1},{type:'human'}]});
+for(const agentType of ['codex','agy','opencode']) {
+test(`${agentType} session waits, previews within a persistent budget, and logs reproducible moves`,async()=>{
+  const m=await Match.create({maxLocks:2,players:[{type:agentType,transitions:1},{type:'human'}]});
   await m.run();assert.equal(m.records.length,0);assert.equal(m.agentStatus().ready,true);
   await assert.rejects(()=>m.step(),/agent endpoint/);
   const before=hashState(m.state),root=await m.agentObserve();
@@ -167,7 +168,7 @@ test('Codex session waits, previews within a persistent budget, and logs reprodu
   assert(records.some(r=>r.type==='agent-event'&&r.event==='rejected'));
   const ended=await m.agentObserve();assert.equal(ended.status,'finished');assert(!('observation' in ended));
 });
-test('Codex public observations and unknown-garbage previews do not disclose hidden state',async()=>{
+test(`${agentType} public observations and unknown-garbage previews do not disclose hidden state`,async()=>{
   const game=createGame();game.players[0].pending=[1];
   const changed=structuredClone(game);changed.seeds=[123,456];
   for(const [i,p] of changed.players.entries()) {
@@ -176,7 +177,7 @@ test('Codex public observations and unknown-garbage previews do not disclose hid
   }
   const roots=[],previews=[];
   for(const state of [game,changed]) {
-    const m=await Match.create({initialState:state,players:[{type:'codex'},{type:'human'}]}),root=await m.agentObserve();
+    const m=await Match.create({initialState:state,players:[{type:agentType},{type:'human'}]}),root=await m.agentObserve();
     roots.push(root.observation);
     const forbidden=new Set(['seeds','pieceRng','garbageRng','bag']);
     const walk=x=>{if(x&&typeof x==='object')for(const [k,v] of Object.entries(x)){assert(!forbidden.has(k));walk(v);}};walk(root);
@@ -188,9 +189,9 @@ test('Codex public observations and unknown-garbage previews do not disclose hid
   }
   assert.deepEqual(roots[0],roots[1]);assert.deepEqual(previews[0],previews[1]);
 });
-test('Codex without previews cannot simulate and cannot move during the human turn',async()=>{
+test(`${agentType} without previews cannot simulate and cannot move during the human turn`,async()=>{
   const game=createGame();game.remaining=1;
-  const m=await Match.create({initialState:game,players:[{type:'codex',preview:false},{type:'human'}]});
+  const m=await Match.create({initialState:game,players:[{type:agentType,preview:false},{type:'human'}]});
   const root=await m.agentObserve();assert.equal(root.preview.enabled,false);assert.equal(root.preview.budget,0);
   await assert.rejects(()=>m.agentAction('preview',{decisionId:root.decisionId,moveId:'m0000',requestId:'x'}),/disabled/);
   await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id});
@@ -199,6 +200,7 @@ test('Codex without previews cannot simulate and cannot move during the human tu
   await assert.rejects(()=>m.agentAction('choose',{decisionId:root.decisionId,moveId:'m0000'}),/Not an agent turn/);
   assert.equal(m.state.status,'playing');await m.stop();
 });
+}
 test('Codex operations serialize and stopping during observation is honored',async()=>{
   const m=await Match.create({players:[{type:'codex'},{type:'human'}]});
   const pending=m.agentObserve();await assert.rejects(()=>m.agentObserve(),/already running/);
@@ -234,42 +236,65 @@ test('Codex identity stays unknown without metadata and rejects invalid reasonin
   assert.deepEqual(m.records[0].execution,{model:null,reasoningEffort:null,provenance:{model:'unknown',reasoningEffort:'unknown'}});
 });
 
-test('Antigravity bridge records a single model identity and replays the selected path',async()=>{
-  assert.equal(playerConfig({type:'agy'}).agentModel,'Gemini');
-  assert.equal(playerConfig({type:'agy',agentModel:''}).agentModel,null);
-  const m=await Match.create({maxLocks:2,players:[{type:'agy',transitions:1},{type:'human'}]});
+for(const [agentType,defaultModel] of [['agy','Gemini'],['opencode','Model']]) {
+test(`${agentType} bridge records a single model identity and replays the selected path`,async()=>{
+  assert.equal(playerConfig({type:agentType}).agentModel,defaultModel);
+  assert.equal(playerConfig({type:agentType,agentModel:''}).agentModel,null);
+  const m=await Match.create({maxLocks:2,players:[{type:agentType,transitions:1},{type:'human'}]});
   await m.run();assert(m.isAgentTurn());assert(m.snapshot().hasAgent);
   assert.equal(m.config.connections[0],null);
   const root=await m.agentObserve(),move=root.observation.legalMoves[0];
-  assert.equal(root.protocol,'stackingbench.agy-session.v1');
-  assert.match(root.prompt,/Antigravity CLI/);
-  assert.equal(root.configuredExecution.model,'Gemini');
+  assert.equal(root.protocol,`stackingbench.${agentType}-session.v1`);
+  assert.match(root.prompt,new RegExp(agentType==='agy'?'Antigravity CLI':'OpenCode'));
+  assert.equal(root.configuredExecution.model,defaultModel);
   const serialized=JSON.stringify(root);
   for(const secret of ['"seed"','"rng"','"queue"'])assert(!serialized.includes(secret));
   const input={decisionId:root.decisionId,moveId:move.id,requestId:'agy-preview'};
   const preview=await m.agentAction('preview',input);
   assert.deepEqual(await m.agentAction('preview',input),preview);
   await m.agentAction('choose',{decisionId:root.decisionId,moveId:move.id});
-  assert.equal(m.records[0].execution.model,'Gemini');
+  assert.equal(m.records[0].execution.model,defaultModel);
   assert.equal(m.records[0].execution.reasoningEffort,null);
-  assert.equal(m.records[0].trace.source,'agy-session');
+  assert.equal(m.records[0].trace.source,`${agentType}-session`);
   assert.equal(m.records[0].metrics.calls,0);
   assert.deepEqual(applyMove(m.header.initialState,m.records[0].move).state,m.state);
   const next=await m.agentObserve();
-  await m.agentAction('choose',{decisionId:next.decisionId,moveId:next.observation.legalMoves[0].id,agentModel:'Gemini custom'});
+  await m.agentAction('choose',{decisionId:next.decisionId,moveId:next.observation.legalMoves[0].id,agentModel:'Custom model'});
   const saved=await readRun(m.id),listing=(await listRuns()).find(r=>r.id===m.id);
-  assert.equal(saved[0].config.players[0].type,'agy');
-  assert.equal(listing.executions[0][1].model,'Gemini custom');
+  assert.equal(saved[0].config.players[0].type,agentType);
+  assert.equal(listing.executions[0][1].model,'Custom model');
   assert.equal(saved.at(-1).status,'finished');
 });
 
-test('Antigravity without previews rejects simulation and waits during the human turn',async()=>{
-  const m=await Match.create({players:[{type:'agy',preview:false},{type:'human'}]});
+test(`${agentType} without previews rejects simulation and waits during the human turn`,async()=>{
+  const m=await Match.create({players:[{type:agentType,preview:false},{type:'human'}]});
   const root=await m.agentObserve();
   await assert.rejects(()=>m.agentAction('preview',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,requestId:'disabled'}),/disabled/);
   await assert.rejects(()=>m.step(),/agent endpoint/);
   await m.stop();
-  const human=await Match.create({players:[{type:'human'},{type:'agy'}]});
+  const human=await Match.create({players:[{type:'human'},{type:agentType}]});
   assert.equal((await human.agentObserve()).ready,false);
   assert(!('observation' in await human.agentObserve()));await human.stop();
+});
+}
+
+test('OpenCode model metadata validates input and preserves explicit unknown values',async()=>{
+  const config=playerConfig({type:'opencode'});
+  assert.equal(config.input,'opencode-session-v1');assert.equal(config.preview,true);assert.equal(config.transitions,32);
+  assert.equal(config.agentModel,'Model');assert.equal(config.reasoningEffort,null);
+  assert.equal(playerConfig({type:'opencode',agentModel:' Custom model '}).agentModel,'Custom model');
+  for(const agentModel of ['',null,'   '])assert.equal(playerConfig({type:'opencode',agentModel}).agentModel,null);
+  assert.equal(playerConfig({type:'opencode',agentModel:'x'.repeat(160)}).agentModel.length,160);
+  for(const agentModel of [123,'x'.repeat(161)])assert.throws(()=>playerConfig({type:'opencode',agentModel}),/agentModel/);
+  for(const observation of ['image','both'])assert.throws(()=>playerConfig({type:'opencode',observation}),/Only text/);
+  const m=await Match.create({maxLocks:3,players:[{type:'opencode',agentModel:'Configured',reasoningEffort:'high'},{type:'human'}]});
+  for(const [input,model,provenance] of [[{},'Configured','user-configured'],[{agentModel:'Reported'},'Reported','agent-reported'],[{agentModel:null},null,'unknown']]) {
+    const root=await m.agentObserve();
+    await assert.rejects(()=>m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,agentModel:'x'.repeat(161)}),/agentModel/);
+    await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,reasoningEffort:'high',...input});
+    assert.deepEqual(m.records.at(-1).execution,{model,reasoningEffort:null,provenance:{model:provenance,reasoningEffort:'unknown'}});
+  }
+  const saved=await readRun(m.id);
+  assert.equal(saved[0].config.players[0].agentModel,'Configured');
+  assert.deepEqual(saved.filter(r=>r.type==='decision').map(r=>r.execution),m.records.map(r=>r.execution));
 });

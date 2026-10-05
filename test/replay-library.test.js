@@ -86,4 +86,19 @@ test('metadata HTTP lifecycle preserves logs, compatibility and public informati
   assert.equal(corruptMetadata.runs.length,110);assert.equal(corruptMetadata.errors.length,2);
   assert.equal((await request('/api/runs/missing/metadata','PATCH',{title:'missing'})).status,404);
   assert.equal((await request('/api/runs?trash=invalid')).status,400);
+  for(const type of ['codex','agy','opencode']) {
+    const configured=await request('/api/matches','POST',{players:[{type,agentModel:'Custom session model',reasoningEffort:'high'},{type:'human'}],maxLocks:1});
+    assert.equal(configured.status,201);
+    assert.equal(configured.value.header.config.players[0].agentModel,'Custom session model');
+    assert.equal(configured.value.header.config.players[0].reasoningEffort,type==='codex'?'high':null);
+    await request(`/api/matches/${configured.value.id}/stop`,'POST',{});
+  }
+});
+
+test('OpenCode replay labels use recorded identities without filling missing historical values',()=>{
+  assert.match(identityLabel({type:'opencode',agentModel:'Model'}),/^OpenCode · Model.*申告情報/);
+  assert.match(identityLabel({type:'opencode'}),/^OpenCode · モデル未記録/);
+  const run={players:[{type:'opencode',agentModel:'Configured'},{type:'human'}],executions:[[{model:'Reported',reasoningEffort:null}],[]]};
+  assert.match(playerLabels(run)[0],/^OpenCode · Reported.*申告情報/);
+  assert.match(identityLabel(run.players[0],{model:null}),/モデル未記録/);
 });

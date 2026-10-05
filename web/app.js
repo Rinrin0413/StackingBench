@@ -2,9 +2,9 @@ import {createLibrary} from '/library.js';
 import {identityLabel} from '/replay-display.js';
 import {SHAPES,cells,spawn,motion,fits,spinType} from '/engine.js';
 const $=id=>document.getElementById(id),colors={I:'#72cfdb',J:'#7498ec',L:'#e6b570',O:'#ded479',S:'#85c39a',T:'#b699d5',Z:'#dd8e91',G:'#6c8580'};
-const isAgentPlayer=type=>['codex','agy'].includes(type);
-const agentName=type=>type==='agy'?'Antigravity CLI (agy)':'Codex';
-const labels={agy:'Antigravity CLI (agy)',codex:'Codex · このセッション',human:'人間（あなた）',search:'探索 bot',llm:'LLM · 試し読みなし','llm-preview':'LLM · 試し読みあり'};
+const isAgentPlayer=type=>['codex','agy','opencode'].includes(type);
+const agentName=type=>({codex:'Codex',agy:'Antigravity CLI (agy)',opencode:'OpenCode'})[type];
+const labels={opencode:'OpenCode',agy:'Antigravity CLI (agy)',codex:'Codex · このセッション',human:'人間（あなた）',search:'探索 bot',llm:'LLM · 試し読みなし','llm-preview':'LLM · 試し読みあり'};
 let current=null,liveId=null,frame=0,follow=true,animation=0,noticeTimer,draft=null,submitting=false;
 let connectionProfiles=[];
 function connectionFor(config) {return connectionProfiles.find(connection=>connection.id===config?.connectionId);}
@@ -50,7 +50,7 @@ function render() {
   $('stop').disabled=!playable||current.stopRequested;$('create').disabled=!!(current?.busy||current?.running);
   $('fork').disabled=!state||state.status!=='playing'||current?.busy||current?.running;$('path').disabled=!record?.move||!!(liveId&&current?.human&&frame===records.length);
   $('prev').disabled=frame===0;$('next').disabled=frame===records.length;
-  $('badge').textContent=!current?'READY':current.busy?'THINKING':!liveId||frame<records.length?'REPLAY':current.state.status==='playing'?(current.human?'YOUR TURN':current.agentWaiting?(current.header.config.players[current.state.active].type==='agy'?'AGY WAIT':'CODEX WAIT'):'LIVE'):current.state.status.toUpperCase();
+  $('badge').textContent=!current?'READY':current.busy?'THINKING':!liveId||frame<records.length?'REPLAY':current.state.status==='playing'?(current.human?'YOUR TURN':current.agentWaiting?(`${current.header.config.players[current.state.active].type.toUpperCase()} WAIT`):'LIVE'):current.state.status.toUpperCase();
   $('match-label').textContent=current?`${library.metadata(current.id)?.title||current.header.config.players.map(p=>labels[p.type]).join(' vs ')}${frame<records.length?' · REPLAY':''}`:'対局を作成して開始';
   const end=current?.state;
   $('progress').textContent=current?.runtimeError?`保存/実行エラー: ${current.runtimeError}`:current?.stopRequested&&current.busy?'現在の判断後に停止します':current?.busy?'判断中 · 応答を待っています':end&&end.status!=='playing'?`${end.winner===null?'勝者なし':`Player ${end.winner===0?'A':'B'} 勝利`} / ${end.reason}`:current?.agentWaiting?`${agentName(current.header.config.players[current.state.active].type)} の入力を待っています`:current?.human?'あなたの番です · 7固定で交代':liveId?'次の判断を開始できます':'リプレイ操作 / 局面から比較';
@@ -76,7 +76,7 @@ function renderAgent() {
 $('copy-agent-request').onclick=catchErrors(async()=>{
   const players=current.header.config.players,active=players[current.state.active];
   const type=(isAgentPlayer(active.type)?active:players.find(p=>isAgentPlayer(p.type))).type;
-  await navigator.clipboard.writeText(`StackingBench の対局 ${current.id} で ${agentName(type)} として対戦開始してください。docs/${type==='agy'?'agy':'codex'}-player.md の手順に従い、専用の agent コマンドだけで公開盤面を読み、手を選んでください。`);
+  await navigator.clipboard.writeText(`StackingBench の対局 ${current.id} で ${agentName(type)} として対戦開始してください。docs/${type}-player.md の手順に従い、専用の agent コマンドだけで公開盤面を読み、手を選んでください。`);
   notice('対戦依頼をコピーしました。対戦相手のセッションに貼り付けてください。');
 });
 function canInput() {
@@ -145,12 +145,12 @@ document.addEventListener('keydown',catchErrors(async e=>{
   if(e.repeat&&!['L','R','D'].includes(op))return;
   await humanInput(op);
 }));
-function player(key) {const type=$(`type-${key}`).value;return {type,...(['llm','llm-preview'].includes(type)?{connectionId:selectedConnection(key),modelId:selectedModel(key),model:selectedModel(key)}:{}),... (type==='codex'?{agentModel:$(`codex-model-${key}`).value,reasoningEffort:$(`codex-effort-${key}`).value}:{}),... (type==='agy'?{agentModel:$(`agy-model-${key}`).value}:{}),preview:$('codex-preview').value==='true',observation:$('observation').value,transitions:Number($('transitions').value),maxTokens:Number($('tokens').value),
+function player(key) {const type=$(`type-${key}`).value;return {type,...(['llm','llm-preview'].includes(type)?{connectionId:selectedConnection(key),modelId:selectedModel(key),model:selectedModel(key)}:{}),... (type==='codex'?{agentModel:$(`codex-model-${key}`).value,reasoningEffort:$(`codex-effort-${key}`).value}:{}),... (['agy','opencode'].includes(type)?{agentModel:$(`${type}-model-${key}`).value}:{}),preview:$('codex-preview').value==='true',observation:$('observation').value,transitions:Number($('transitions').value),maxTokens:Number($('tokens').value),
   timeoutMs:Number($('timeout').value)*1000,temperature:Number($('temperature').value),thinking:$('thinking').value,decisionTokens:Number($('decision-tokens').value),maxCalls:Number($('max-calls').value),requestIntervalMs:Number($('request-interval').value)*1000};}
 async function create(parent) {
   current=await api('/api/matches',{players:[player('a'),player('b')],seeds:[Number($('seed-a').value),Number($('seed-b').value)],first:Number($('first').value),maxLocks:Number($('max-locks').value),...(parent?{parent}:{})});
   liveId=current.id;frame=0;follow=true;animation++;draft=null;sessionStorage.setItem('stackingbench-live',liveId);
-  if(current.header.config.players.some(p=>['human','codex','agy'].includes(p.type)))current=await api(`/api/matches/${liveId}/run`,{});
+  if(current.header.config.players.some(p=>['human','codex','agy','opencode'].includes(p.type)))current=await api(`/api/matches/${liveId}/run`,{});
   render();focusBoard();await refresh();
 }
 $('setup').addEventListener('submit',catchErrors(async e=>{e.preventDefault();await create();}));
@@ -192,7 +192,7 @@ async function loadConnectionModels(key) {
 for(const key of ['a','b']) {
   const update=()=>{
     const type=$(`type-${key}`).value,llm=['llm','llm-preview'].includes(type),profile=connectionFor({connectionId:selectedConnection(key)});
-    $('agy-identity-'+key).hidden=type!=='agy';$('codex-identity-'+key).hidden=type!=='codex';
+    for(const agent of ['agy','opencode'])$(agent+'-identity-'+key).hidden=type!==agent;$('codex-identity-'+key).hidden=type!=='codex';
     $(`connection-${key}`).parentElement.hidden=!llm;$(`model-${key}`).parentElement.hidden=!llm;$(`model-id-${key}`).disabled=!llm;$(`model-${key}`).disabled=!llm;
     const preview=Array.from($(`type-${key}`).options).find(o=>o.value==='llm-preview'),jev=profile?.protocol==='typesafe-jev-choice';
     preview.disabled=jev;if(jev&&type==='llm-preview')$(`type-${key}`).value='llm';

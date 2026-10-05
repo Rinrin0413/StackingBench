@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {mkdir} from 'node:fs/promises';
 const {chromium}=await import(process.env.PLAYWRIGHT_MODULE??'playwright');
-const agentType=process.env.AGENT_TYPE??'codex',agentLabel=agentType==='agy'?'Antigravity':'Codex',waitBadge=agentType==='agy'?'AGY WAIT':'CODEX WAIT';
+const agentType=process.env.AGENT_TYPE??'codex';
+const agentLabel={codex:'Codex',agy:'Antigravity',opencode:'OpenCode'}[agentType];
+assert(agentLabel,'Unsupported AGENT_TYPE');
+const waitBadge=`${agentType.toUpperCase()} WAIT`,defaultModel={codex:'GPT-6 Astra',agy:'Gemini',opencode:'Model'}[agentType];
 const url=process.env.APP_URL??'http://127.0.0.1:3211';
 const cli=(args,input)=>new Promise((resolve,reject)=>{
   const child=spawn(process.execPath,['scripts/agent.js',...args],{env:{...process.env,STACKINGBENCH_URL:url},stdio:['pipe','pipe','pipe']});
@@ -15,17 +18,17 @@ const browser=await chromium.launch({headless:true,...(process.env.CHROME_PATH?{
 try {
   const page=await browser.newPage({viewport:{width:1440,height:1150}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
-  await page.goto(url);await page.waitForFunction(()=>document.querySelector('#model-a').options.length>=3);
-  if(agentType==='agy'){await page.selectOption('#type-b','agy');assert.equal(await page.inputValue('#agy-model-b'),'Gemini');assert(await page.locator('fieldset').nth(1).locator('#agy-model-b').isVisible());}
+  await page.goto(url);await page.waitForFunction(()=>document.querySelector('#connection-a').options.length>0&&document.querySelector('#model-a').options.length>0);
+  if(agentType!=='codex'){await page.selectOption('#type-b',agentType);assert.equal(await page.inputValue(`#${agentType}-model-b`),defaultModel);assert(await page.locator('fieldset').nth(1).locator(`#${agentType}-model-b`).isVisible());}
   await page.selectOption('#type-a',agentType);await page.selectOption('#type-b','human');await page.fill('#max-locks','15');
   await page.click('#create');await page.waitForFunction(badge=>document.querySelector('#badge').textContent===badge,waitBadge);
   await page.evaluate(()=>{navigator.clipboard.writeText=async text=>{window.copiedRequest=text;};});
   await page.click('#copy-agent-request');
-  assert.match(await page.evaluate(()=>window.copiedRequest),new RegExp(`docs/${agentType==='agy'?'agy':'codex'}-player.md`));
+  assert.match(await page.evaluate(()=>window.copiedRequest),new RegExp(`docs/${agentType}-player.md`));
   const id=await page.inputValue('#agent-match-id');assert((await cli(['list'])).some(m=>m.id===id&&m.ready));
   assert(await page.isDisabled('#step'));assert(await page.isDisabled('#run'));assert(await page.isDisabled('[data-input="HD"]'));
-  assert(await page.isDisabled('#model-a'));assert.match(await page.textContent('#recorded-model-a'),agentType==='agy'?/Antigravity.*Gemini/:/Codex.*GPT-6 Astra.*High/);
-  if(agentType==='agy'){assert.equal(await page.locator('#agy-identity-a input').count(),1);assert(await page.isHidden('#codex-identity-a'));assert(await page.isHidden('#model-a'));}
+  assert(await page.isDisabled('#model-a'));assert.match(await page.textContent('#recorded-model-a'),new RegExp(`${agentLabel}.*${defaultModel}${agentType==='codex'?'.*high':''}`));
+  if(agentType!=='codex'){assert.equal(await page.locator(`#${agentType}-identity-a input`).count(),1);assert(await page.isHidden('#codex-identity-a'));assert(await page.isHidden('#model-a'));}
   let last;
   for(let i=0;i<7;i++) {
     const root=await cli(['observe',id]);

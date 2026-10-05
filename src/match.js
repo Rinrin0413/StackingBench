@@ -65,7 +65,7 @@ export class Match {
     const preflightCapabilities=options.preflightCapabilities!==false;
     if(preflightCapabilities) {
       for(const [index,player] of players.entries()) {
-        if(['search','human','codex','agy'].includes(player.type))continue;
+        if(['search','human','codex','agy','opencode'].includes(player.type))continue;
         if(player.capabilitySnapshot)continue;
         const profile=player.connection??connectionProfile(player.connectionId),snapshot=await ensureCapabilitySnapshot(profile,player.modelId??player.model,{refresh:options.refreshCapabilities===true||options.useCapabilityCache===false,
           targets:options.probeTargets??capabilityTargetsForConfig(player),timeoutMs:player.timeoutMs,transport:options.probeTransport??undefined,
@@ -74,7 +74,7 @@ export class Match {
       }
     }
     const connections=players.map(p=>{
-      if(['search','human','codex','agy'].includes(p.type))return null;
+      if(['search','human','codex','agy','opencode'].includes(p.type))return null;
       const profile=p.connection??connectionProfile(p.connectionId),snapshot=capabilityForConfig(p,profile);
       if(preflightCapabilities||p.capabilitySnapshot)assertCapabilitySelection(p,profile,snapshot,{requireSupported:true});
       const modelId=p.modelId??p.model,capabilities=capabilityDefaultsForModel(profile,modelId);

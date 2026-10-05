@@ -36,7 +36,7 @@
 
 自他の24行盤面、HOLD、B2B、REN、予告総量、自己currentとNEXT5、残り固定数、直前結果、合法手を渡す。相手のcurrent/NEXT、seed、bag、乱数状態、予告packet構成は非公開。作戦メモは最大240文字、説明は最大400文字。説明は内部推論の証拠ではない。
 
-プレイヤー種別は `llm` / `llm-preview` / `search` / `human` / `codex`。観測設定は別軸の `text` (実装済み)、`image` / `both` (LLMでは未実装なので明示エラー)。探索は表示エンコーディングに依存せず構造データを読むが、LLM と同じ公開情報境界で探索する。
+プレイヤー種別は `llm` / `llm-preview` / `search` / `human` / `codex` / `agy` / `opencode`。観測設定は別軸の `text` (実装済み)、`image` / `both` (LLMでは未実装なので明示エラー)。探索は表示エンコーディングに依存せず構造データを読むが、LLM と同じ公開情報境界で探索する。
 
 LLM は JSON で `choose` または `preview` を要求するアプリケーションレベルのツール方式。モデル固有の native tool calling には依存しない。preview は root または過去のnodeと局所move IDを指定する。採用時は必ず root の手を指定する。仮置き結果、盤面、次の合法手を返す。予算は判断ごと32状態遷移。試行した未知境界への遷移も1回に数える。実行前に既知のNEXT5だけのコピーへ切り詰め、乱数状態と相手の将来ミノを除去。未知の穴のせり上げ直前に停止し、盤面は返さず `unknown-garbage`。既知ミノを使い切った固定後は盤面を返し `unknown-next` で停止。空HOLDの次ミノが未知なら当該手は列挙しない。ターン末では `turn-end`。相手の応答を仮定した探索はしない。
 
@@ -69,3 +69,5 @@ LLM は JSON で `choose` または `preview` を要求するアプリケーシ�
 ## Codex セッション接続
 
 `codex` は外部セッションからの入力待ちとなる追加プレイヤー種別で、ゲームルールv1と既存リプレイ互換性は変えない。試し読みの可否は `preview`、予算は `transitions` に保存する。観測・試し読みの公開境界はLLMと同一。最新ルートの合法手IDと局面ごとのdecisionIdを検証し、エンジンの保存経路で実行する。通常LLMとはコンテキスト・生成予算・エラー処理が異なる別条件であり、トークン数と費用は不明。詳細は [Codex セッションの手順と記録仕様](codex-player.md)。
+
+Antigravity (`agy`) と OpenCode (`opencode`) も同じ外部セッション接続を使用する。モデル名は記録用の自由記述で、既定値はそれぞれ `Gemini` / `Model`。推論レベルは記録しない。ゲームルールv1・既存リプレイ互換性は維持する。詳細は [Antigravity の手順](agy-player.md) と [OpenCode の手順](opencode-player.md)。

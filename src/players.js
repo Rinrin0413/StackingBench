@@ -1,4 +1,4 @@
-import {isAgentPlayer,agentModel,reasoningEffort} from './agent-identity.js';
+import {isAgentPlayer,agentModel,reasoningEffort,agentDefaultModels} from './agent-identity.js';
 import {performance} from 'node:perf_hooks';
 import {setTimeout as delay} from 'node:timers/promises';
 import {legalMoves,pendingCount} from './engine.js';
@@ -21,7 +21,7 @@ export function playerConfig(value={}) {
     const preview=value.preview??true,transitions=value.transitions??32;
     if(value.observation!==undefined&&value.observation!=='text')throw Error('Only text observations are implemented');
     if(typeof preview!=='boolean'||!Number.isInteger(transitions)||transitions<1||transitions>2048)throw Error('Invalid agent preview settings');
-    return {type:value.type,observation:'text',input:`${value.type}-session-v1`,preview,transitions,model:null,agentModel:agentModel(value.agentModel===undefined&&value.type==='agy'?'Gemini':value.agentModel),reasoningEffort:value.type==='agy'?null:reasoningEffort(value.reasoningEffort),metadataSource:'user-configured'};
+    return {type:value.type,observation:'text',input:`${value.type}-session-v1`,preview,transitions,model:null,agentModel:agentModel(value.agentModel===undefined?agentDefaultModels[value.type]:value.agentModel),reasoningEffort:value.type!=='codex'?null:reasoningEffort(value.reasoningEffort),metadataSource:'user-configured'};
   }
   const modelId=value.modelId??value.model??DEFAULT_MODEL;
   const inferredProvider=value.provider??(value.connectionId?connectionProfile(value.connectionId).legacyProvider:providerFor(modelId));
@@ -248,6 +248,6 @@ export async function llmDecision(game,config,{baseUrl=process.env.LLM_BASE_URL?
   }
 }
 export async function decide(game,config,options={}) {
-  if(['human','codex','agy'].includes(config.type)) throw Error('External player input required');
+  if(['human','codex','agy','opencode'].includes(config.type)) throw Error('External player input required');
   return config.type==='search'?searchDecision(game,config):llmDecision(game,config,options);
 }

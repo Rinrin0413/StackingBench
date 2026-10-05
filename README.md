@@ -30,6 +30,7 @@ StackingBench では以下のプレイヤー種別を自由に組み合わせて
 | LLM（試し読みあり） | `llm-preview` | 公開観測に加え、遷移予算内で仮置きツール（試し読み）を使用可能。 |
 | Codex セッション | `codex` | 既存の Codex セッションから専用 CLI 経由で公開観測・試し読み・手を送受信。 |
 | Antigravity CLI | `agy` | 既存の Antigravity CLI (agy) セッションから専用 CLI 経由で対戦。 |
+| OpenCode | `opencode` | 既存の OpenCode セッションから専用 CLI 経由で対戦。 |
 
 ### 自分で対戦する（人間）
 
@@ -76,6 +77,7 @@ LLM プレイヤー（`llm` / `llm-preview`）は、ローカル推論サーバ�
 
 - **Codex セッション**: 相手を「Codex · このセッション」にし、画面に表示される対局ID付きの依頼を Codex の会話に伝えます。試し読み切替可能（既定32遷移）、モデル名・推論レベルも記録されます。詳細は [docs/codex-player.md](docs/codex-player.md) を参照してください。
 - **Antigravity CLI (agy)**: 相手を「Antigravity CLI (agy)」にし、対局作成後に「対戦依頼をコピー」して agy の会話に貼り付けます。記録用モデル名を設定可能。詳細は [docs/agy-player.md](docs/agy-player.md) を参照してください。
+- **OpenCode**: 相手を「OpenCode」にし、対局作成後に「対戦依頼をコピー」して opencode の会話に貼り付けます。記録用モデル名は自由記述、既定値は `Model`。詳細は [docs/opencode-player.md](docs/opencode-player.md) を参照してください。
 
 ## 主な機能
 
@@ -157,7 +159,7 @@ pnpm run check
 |`src/transport.js`|native fetch、credential/static header、timeout、redaction、hidden retry のない HTTP transport|
 |`src/capabilities.js`|connection + model 単位の probe、cache、capability snapshot|
 |`src/probe.js`|対局と分離した生成の疎通確認|
-|`src/agent.js`|Codex / agy セッション用の公開観測・試し読み予算・選択JSON検証|
+|`src/agent.js`|Codex / agy / OpenCode セッション用の公開観測・試し読み予算・選択JSON検証|
 |`src/match.js`|対局進行、JSONL保存、集計|
 |`src/server.js`|ローカルHTTP APIと画面配信|
 |`web/`|対戦・リプレイ画面。描画にエンジンのセル形状・操作を共有|

@@ -8,19 +8,22 @@ try {
   const page=await browser.newPage({viewport:{width:1440,height:1150}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   await page.goto(process.env.APP_URL??'http://127.0.0.1:3210');
-  await page.waitForFunction(()=>document.querySelector('#model-a').options.length>=3);
-  const assertPlayerFields=async(key,type,{connection=false,model=false,codex=false,agy=false}={})=>{
+  await page.waitForFunction(()=>document.querySelector('#connection-a').options.length>0&&document.querySelector('#model-a').options.length>0);
+  const assertPlayerFields=async(key,type,{connection=false,model=false,codex=false,agy=false,opencode=false}={})=>{
     await page.selectOption(`#type-${key}`,type);
     assert.equal(await page.isVisible(`#connection-${key}`),connection,`${type}: connection visibility`);
     assert.equal(await page.isVisible(`#model-${key}`),model,`${type}: model visibility`);
     assert.equal(await page.isVisible(`#codex-identity-${key}`),codex,`${type}: Codex identity visibility`);
     assert.equal(await page.isVisible(`#agy-identity-${key}`),agy,`${type}: agy identity visibility`);
+    assert.equal(await page.isVisible(`#opencode-identity-${key}`),opencode,`${type}: OpenCode identity visibility`);
   };
   for(const key of ['a','b']) {
     await assertPlayerFields(key,'search');
     await assertPlayerFields(key,'human');
     await assertPlayerFields(key,'codex',{codex:true});
     await assertPlayerFields(key,'agy',{agy:true});
+    await assertPlayerFields(key,'opencode',{opencode:true});
+    assert.equal(await page.inputValue(`#opencode-model-${key}`),'Model');
     await assertPlayerFields(key,'llm',{connection:true,model:true});
     await assertPlayerFields(key,'llm-preview',{connection:true,model:true});
     await page.selectOption(`#type-${key}`,'search');

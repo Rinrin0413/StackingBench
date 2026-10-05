@@ -77,7 +77,7 @@ const server=createServer(async(req,res)=>{
       if(probeBusy||[...matches.values()].some(m=>m.busy||m.running)) return json(res,409,{error:'Wait for the running decision before starting another match'});
       delete options.initialState;
       if(Array.isArray(options.players))options.players=options.players.map(player=>{
-        const allowed=['type','connectionId','modelId','model','observation','preview','transitions','maxTokens','timeoutMs','temperature','thinking','decisionTokens','maxCalls','requestIntervalMs','responseFormat','responseParsing'];
+        const allowed=['type','agentModel','reasoningEffort','connectionId','modelId','model','observation','preview','transitions','maxTokens','timeoutMs','temperature','thinking','decisionTokens','maxCalls','requestIntervalMs','responseFormat','responseParsing'];
         return Object.fromEntries(allowed.filter(key=>Object.hasOwn(player,key)).map(key=>[key,player[key]]));
       });
       delete options.capabilitySnapshots;delete options.preflightCapabilities;delete options.baseUrl;
