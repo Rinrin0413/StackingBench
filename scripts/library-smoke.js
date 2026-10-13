@@ -66,6 +66,9 @@ try {
   await click('#library-active');await click('.run-card');
   await button('情報を編集');await fill('#override-0-model','original');await button('保存する');await wait("document.querySelector('#library-status').textContent==='保存しました'");
   assert.match(await evaluate("document.querySelector('.run-card').textContent"),/Original model/);
+  assert.doesNotMatch(await evaluate("document.querySelector('.run-card').textContent"),/high|推論レベル/);
+  assert.doesNotMatch(await evaluate("document.querySelector('#library-detail').textContent"),/high|推論レベル/);
+  assert.doesNotMatch(await evaluate("document.querySelector('#recorded-model-a').textContent"),/high|推論レベル/);
   await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   assert(await evaluate("document.querySelector('#replay-library').scrollWidth<=document.querySelector('#replay-library').clientWidth"),'Mobile dialog overflow');
   await writeFile('runs/ui-library-mobile.png',Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));

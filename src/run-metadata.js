@@ -2,7 +2,6 @@ import {readFile,mkdir,writeFile,rename,rm} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
 const root=resolve(process.env.STACKINGBENCH_RUNS??'runs');
-const efforts=['none','minimal','low','medium','high','xhigh','max','ultra'];
 const empty=()=>({title:null,favorite:false,trashed:false,players:[{},{}]});
 const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 function path(id){if(!/^[a-zA-Z0-9_-]+$/.test(id))throw Error('Invalid run ID');return join(root,'metadata',`${id}.json`);}
@@ -24,8 +23,7 @@ function validate(input,players,legacy=false) {
         if(p.model!==null&&(typeof p.model!=='string'||p.model.length>300))throw Error('Model must be at most 300 characters');
         value.model=p.model?.trim()||null;
       }
-      if(Object.hasOwn(p,'reasoningEffort')&&p.reasoningEffort!==null&&!efforts.includes(p.reasoningEffort))throw Error('Invalid reasoning effort');
-      // Read old overrides without exposing the retired field; leave the source file intact.
+      // Reads omit the retired field; the next PATCH also removes it from the stored metadata.
       delete value.reasoningEffort;
       return value;
     });

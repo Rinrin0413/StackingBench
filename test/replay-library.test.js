@@ -53,7 +53,7 @@ test('metadata HTTP lifecycle preserves logs, compatibility and public informati
   const patch={title:'訂正した対局',favorite:true,players:[{model:'Corrected Ultra'},{}]};
   assert.equal((await request(url,'PATCH',patch)).status,200);
   assert.deepEqual((await request(`/api/agent/matches/${id}`)).value,observe);
-  assert(!JSON.stringify((await request(`/api/agent/matches/${id}/status`)).value).includes('Corrected Ultra'));
+  assert(!JSON.stringify((await request(`/api/agent/matches/${id}/status`)).value).includes('Corrected'));
   const before=await readFile(join(root,`${id}.jsonl`),'utf8');
   for(const invalid of [{players:[{model:3},{}]},{players:[{}, {model:'human-model'}]},{title:'x'.repeat(161)},{players:[{model:'x'.repeat(301)},{}]},{players:[{reasoningEffort:'high'},{}]},{favorite:'true'},{seed:5},{players:[]},{players:[null,{}]}])assert.equal((await request(url,'PATCH',invalid)).status,400);
   assert.equal((await request(url,'PATCH',{title:'bad'},{Origin:'https://example.com'})).status,403);
@@ -61,14 +61,18 @@ test('metadata HTTP lifecycle preserves logs, compatibility and public informati
   assert.equal(await readFile(join(root,`${id}.jsonl`),'utf8'),before);
   await request(`/api/matches/${id}/stop`,'POST',{});
   const original=await readFile(join(root,`${id}.jsonl`),'utf8');
-  const legacyMetadata={title:'Legacy',favorite:true,trashed:false,players:[{model:'Legacy model',reasoningEffort:'high'},{}]};
-  const metadataFile=join(root,'metadata',`${id}.json`),legacySource=JSON.stringify(legacyMetadata)+'\n';
-  await writeFile(metadataFile,legacySource);
-  assert.deepEqual((await request(url)).value,{...legacyMetadata,players:[{model:'Legacy model'},{}]});
-  assert.equal(await readFile(metadataFile,'utf8'),legacySource);
-  assert.equal((await request('/api/runs?library=1')).value.errors.length,0);
-  await request(url,'PATCH',{favorite:false});
-  assert(!JSON.stringify(JSON.parse(await readFile(metadataFile,'utf8'))).includes('reasoningEffort'));
+  const metadataFile=join(root,'metadata',`${id}.json`);
+  for(const reasoningEffort of ['high','unlimited',null,123,{old:'value'}]) {
+    const legacyMetadata={title:'Legacy',favorite:true,trashed:false,players:[{model:'Legacy model',reasoningEffort},{}]},legacySource=JSON.stringify(legacyMetadata)+'\n';
+    await writeFile(metadataFile,legacySource);
+    const read=await request(url);assert.equal(read.status,200);
+    assert.deepEqual(read.value,{...legacyMetadata,players:[{model:'Legacy model'},{}]});
+    assert.equal(await readFile(metadataFile,'utf8'),legacySource);
+    const library=(await request('/api/runs?library=1')).value;
+    assert.equal(library.errors.length,0);assert(library.runs.some(run=>run.id===id));
+    assert.equal((await request(url,'PATCH',{favorite:false})).status,200);
+    assert.deepEqual(JSON.parse(await readFile(metadataFile,'utf8')),{...legacyMetadata,favorite:false,players:[{model:'Legacy model'},{}]});
+  }
   await request(url,'PATCH',{players:[{model:null},{}]});
   assert.deepEqual((await request(url)).value.players[0],{model:null});
   await request(url,'PATCH',{players:[{},{}]});assert.deepEqual((await request(url)).value.players,[{},{}]);

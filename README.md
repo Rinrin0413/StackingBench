@@ -138,6 +138,8 @@ pnpm run check
 
 ライブラリの管理情報は `runs/metadata/<対局ID>.json` に別保存します。タイトル・モデル表示の訂正・お気に入り・ゴミ箱状態は、元の JSONL、対局設定、再現検証、エージェントへの観測を変更しません。バックアップ時は JSONL と `metadata/` を一緒にコピーしてください。既存ログは管理情報なしでもそのまま利用できます。
 
+旧管理情報の `reasoningEffort` は値にかかわらず読み込み時に無視します。読み込みだけではファイルを変更しませんが、お気に入りの変更なども含め、次の PATCH で保存ファイルから除去します。元の対局 JSONL は変更しません。
+
 管理 API は `GET/PATCH /api/runs/:id/metadata`。PATCH は `title`、`favorite`、`trashed`、`players` を受け付けます。`players` は A/B の2要素で、各要素の `model` は省略で元の記録、`null` で未記録、文字列で訂正を表します。`GET /api/runs?library=1&trash=all` は `{runs, errors}` を返し、破損ファイルがあっても他の対局を一覧できます。`trash` は `active`（既定）・`trash`・`all`。従来のリプレイ取得 API と既定の一覧配列形式は維持します。
 
 ライブラリのブラウザ回帰確認は `CHROME_PATH=/usr/bin/google-chrome node scripts/library-smoke.js` で実行できます。専用の一時データとサーバーを使用し、スクリーンショットを `runs/` に保存します。

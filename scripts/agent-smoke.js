@@ -6,7 +6,7 @@ const {chromium}=await import(process.env.PLAYWRIGHT_MODULE??'playwright');
 const agentType=process.env.AGENT_TYPE??'codex';
 const agentLabel={codex:'Codex',agy:'Antigravity',opencode:'OpenCode',claude:'Claude Code'}[agentType];
 assert(agentLabel,'Unsupported AGENT_TYPE');
-const waitBadge=`${agentType.toUpperCase()} WAIT`,defaultModel={codex:'GPT-6 Astra',agy:'Gemini',opencode:'Model',claude:'Claude'}[agentType];
+const waitBadge=`${agentType.toUpperCase()} WAIT`,defaultModel={codex:'GPT-6 Astra High',agy:'Gemini',opencode:'Model',claude:'Claude'}[agentType];
 const url=process.env.APP_URL??'http://127.0.0.1:3211';
 const cli=(args,input)=>new Promise((resolve,reject)=>{
   const child=spawn(process.execPath,['scripts/agent.js',...args],{env:{...process.env,STACKINGBENCH_URL:url},stdio:['pipe','pipe','pipe']});
@@ -27,7 +27,7 @@ try {
   assert.match(await page.evaluate(()=>window.copiedRequest),new RegExp(`docs/${agentType}-player.md`));
   const id=await page.inputValue('#agent-match-id');assert((await cli(['list'])).some(m=>m.id===id&&m.ready));
   assert(await page.isDisabled('#step'));assert(await page.isDisabled('#run'));assert(await page.isDisabled('[data-input="HD"]'));
-  assert(await page.isDisabled('#model-a'));assert.match(await page.textContent('#recorded-model-a'),new RegExp(`${agentLabel}.*${defaultModel}${agentType==='codex'?'.*high':''}`));
+  assert(await page.isDisabled('#model-a'));assert.match(await page.textContent('#recorded-model-a'),new RegExp(`${agentLabel}.*${defaultModel}`));
   if(agentType!=='codex'){assert.equal(await page.locator(`#${agentType}-identity-a input`).count(),1);assert(await page.isHidden('#codex-identity-a'));assert(await page.isHidden('#model-a'));}
   let last;
   for(let i=0;i<7;i++) {
