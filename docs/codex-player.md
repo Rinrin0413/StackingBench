@@ -16,7 +16,7 @@
 **対戦の指示を受けてから実行します。** 実対局の判断中に完全ログ (`runs/`)、ビューアー用API、seed、乱数状態、相手のNEXTを読みません。盤面評価用の独自スクリプト・探索botに手の選択を委ねず、以下の専用コマンドから得た公開観測と許可された試し読みだけで自分で判断します。実装やテストを読む場合は対戦の判断と区別してください。
 
 ```bash
-# サーバー上で読み込まれている Codex 対局を確認（系列・盤面は含まない）
+# サーバー上で読み込まれている全外部セッション対局を確認（系列・盤面は含まない）
 pnpm run agent -- list
 
 # 指定対局の公開盤面、合法手、ルール説明、前回メモを取得
@@ -26,33 +26,31 @@ pnpm run agent -- observe RUN_ID
 pnpm run agent -- wait RUN_ID --after PREVIOUS_DECISION_ID --timeout-ms 50000
 ```
 
+`list` は全外部セッション種別（Codex / Antigravity / OpenCode / Claude Code）の対局を返します。依頼された対局IDと `players[].type` を確認してください。
+
 実行先は既定で `http://127.0.0.1:3210`。開発用の別ポートだけ使う場合は `STACKINGBENCH_URL=http://127.0.0.1:3211`。専用CLIはローカルHTTP以外を拒否し、リダイレクトを追いません。
 
 観測の `decisionId` は局面ごとに変わります。自分の番以外には盤面・合法手を返さず、`ready:false` の状態だけを返します。終了時は `status` と結果を返します。`wait` が `waiting:true` を返した場合は待機時間の終了であり、失格や手の確定ではありません。相手待機中に定期的な実況を繰り返す必要はありません。
 
-1手ずつ判断します。必要なら以下のJSONを作業用ファイルに保存し、試し読みします。
-
-```json
-{"decisionId":"観測のdecisionId","node":"root","moveId":"m0012","requestId":"preview-1"}
-```
+1手ずつ判断します。必要なら以下のようにJSONを標準入力で送り、試し読みします。共有の一時ファイルを使わないため、他のセッションとファイルが競合しません。
 
 ```bash
-pnpm run agent -- preview RUN_ID --file /tmp/stackingbench-preview.json
+pnpm run agent -- preview RUN_ID --file - <<'JSON'
+{"decisionId":"観測のdecisionId","node":"root","moveId":"m0012","requestId":"preview-1"}
+JSON
 ```
 
-`node` は `root` または以前に返されたノードID。深さ、未知NEXT、未来のおじゃま穴の境界は既存の試し読みと同じです。`requestId` が同じで内容も同じなら保存済みの結果を返し、予算を再消費しません。別の試し読みでは新しいIDを使います。省略時はCLIがUUIDを生成しますが、通信失敗後に同じ要求を再送する場合はファイル側にIDを指定してください。観測を再取得しても予算はリセットされません。
+`node` は `root` または以前に返されたノードID。深さ、未知NEXT、未来のおじゃま穴の境界は既存の試し読みと同じです。`requestId` が同じで内容も同じなら保存済みの結果を返し、予算を再消費しません。別の試し読みでは新しいIDを使います。省略時はCLIがUUIDを生成しますが、通信失敗後に同じ要求を再送する場合は送信するJSONにIDを指定してください。観測を再取得しても予算はリセットされません。
 
 選択が決まったら、**最新のルート観測**の合法手IDを送ります。深いノードでだけ有効なIDを最終手に使いません。
 
-```json
-{"decisionId":"観測のdecisionId","moveId":"m0012","reason":"短い選択理由","memo":"次の判断への短いメモ","agentModel":"GPT-6 Astra","reasoningEffort":"high"}
-```
-
 ```bash
-pnpm run agent -- choose RUN_ID --file /tmp/stackingbench-choice.json
+pnpm run agent -- choose RUN_ID --file - <<'JSON'
+{"decisionId":"観測のdecisionId","moveId":"m0012","reason":"短い選択理由","memo":"次の判断への短いメモ","agentModel":"GPT-6 Astra","reasoningEffort":"high"}
+JSON
 ```
 
-`--file -` で標準入力のJSONも受け付けます。`reason` は最大400文字、`memo` は240文字、`agentModel` は160文字です。モデル名・推論レベルが分かる場合は `agentModel` と `reasoningEffort` に実際の値を指定します。推論レベルは `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max` / `ultra` を受け付け、小文字で保存します。不明なら推測せず省略します。省略した項目は対局開始時の記録用設定を使い、明示的なnullは未記録として扱います。途中でモデルや推論レベルを変更した場合は、その後の各判断で実際の値を送ってください。
+`reason` は最大400文字、`memo` は240文字、`agentModel` は160文字です。モデル名・推論レベルが分かる場合は `agentModel` と `reasoningEffort` に実際の値を指定します。推論レベルは `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max` / `ultra` を受け付け、小文字で保存します。不明なら推測せず省略します。省略した項目は対局開始時の記録用設定を使い、明示的なnullは未記録として扱います。途中でモデルや推論レベルを変更した場合は、その後の各判断で実際の値を送ってください。
 
 開始時の値はheaderの `config.players[].agentModel` / `reasoningEffort`、各手の使用値はdecisionの `execution.model` / `execution.reasoningEffort` に保存します。`execution.provenance` で `user-configured`（対局設定）・`agent-reported`（判断時の申告）・`unknown` を区別します。サーバーの自動検証済み情報ではありません。リプレイは表示中の手までの記録を参照し、保存対局一覧は記録されたモデル・推論レベルの組合せを表示します。以前のログの空欄は推測で補いません。
 
