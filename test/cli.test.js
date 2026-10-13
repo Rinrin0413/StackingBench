@@ -4,7 +4,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
-import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,writeFile,appendFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createGame} from '../src/engine.js';
@@ -65,4 +65,18 @@ test('replay CLI accepts a run ID with and without a pnpm separator',async t=>{
   const initialState=createGame(),initialHash=hashState(initialState);
   await writeFile(join(dir,'fixture.jsonl'),JSON.stringify({type:'header',initialState,initialHash})+'\n');
   for(const prefix of [[],['--']])assert.match(await pnpm('replay',[...prefix,'fixture'],{STACKINGBENCH_RUNS:dir}),/Verified 0 decisions: fixture/);
+});
+test('large logs remain listable, verifiable and branchable within a 32 MB heap',async t=>{
+  const {hashState}=await import('../src/match.js');
+  const dir=await mkdtemp(join(tmpdir(),'stackingbench-large-log-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+  const initialState=createGame(),header={type:'header',format:2,id:'large',createdAt:new Date().toISOString(),config:{players:[{type:'search'},{type:'search'}]},initialState,initialHash:hashState(initialState)};
+  const path=join(dir,'large.jsonl');await writeFile(path,JSON.stringify(header)+'\n');
+  const event=JSON.stringify({type:'agent-event',trace:{padding:'x'.repeat(256*1024)}})+'\n';
+  for(let i=0;i<192;i++)await appendFile(path,event);
+  const options={env:{...process.env,STACKINGBENCH_RUNS:dir},timeout:15000};
+  const verification=await execute(process.execPath,['--max-old-space-size=32','scripts/replay.js','large'],options);
+  assert.match(verification.stdout,/Verified 0 decisions/);
+  const inspection=await execute(process.execPath,['--max-old-space-size=32','--input-type=module','-e',
+    "import assert from 'node:assert/strict';import {listRuns,readRun,readRunPosition} from './src/match.js';assert.equal((await listRuns())[0].id,'large');assert.equal((await readRun('large',{compact:true})).length,193);assert.equal((await readRunPosition('large',0)).locks,0);"],options);
+  assert.equal(inspection.stderr,'');
 });

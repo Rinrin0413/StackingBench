@@ -1,6 +1,7 @@
 import {readMetadata} from './run-metadata.js';
 import {isAgentPlayer} from './agent-identity.js';
 import {mkdir,appendFile,readFile,readdir} from 'node:fs/promises';
+import {createReadStream} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
@@ -14,17 +15,38 @@ import {responseFormatPolicy} from './protocols.js';
 import {AgentTurn} from './agent.js';
 
 export const RUNS=resolve(process.env.STACKINGBENCH_RUNS??'runs');
-export const RUN_FORMAT=Number.isInteger(Number(process.env.STACKINGBENCH_RUN_FORMAT))&&Number(process.env.STACKINGBENCH_RUN_FORMAT)>=2?Number(process.env.STACKINGBENCH_RUN_FORMAT):2;
+export const RUN_FORMAT=Number.isInteger(Number(process.env.STACKINGBENCH_RUN_FORMAT))&&Number(process.env.STACKINGBENCH_RUN_FORMAT)>=3?Number(process.env.STACKINGBENCH_RUN_FORMAT):3;
 export const hashState=state=>createHash('sha256').update(JSON.stringify(state)).digest('hex');
-export async function readRun(id) {
+export async function* streamRun(id) {
   if(!/^[a-zA-Z0-9_-]+$/.test(id)) throw Error('Invalid run ID');
-  const content=await readFile(join(RUNS,`${id}.jsonl`),'utf8'),lines=content.split('\n'),records=[];
-  for(let i=0;i<lines.length;i++) {
-    if(!lines[i].trim()) continue;
-    try {records.push(JSON.parse(lines[i]));}
-    catch(e) {if(i===lines.length-1) break;throw e;}
+  let tail='';
+  for await(const chunk of createReadStream(join(RUNS,`${id}.jsonl`),{encoding:'utf8'})) {
+    tail+=chunk;
+    let start=0,end;
+    while((end=tail.indexOf('\n',start))!==-1) {
+      const line=tail.slice(start,end);start=end+1;
+      if(line.trim())yield JSON.parse(line);
+    }
+    tail=tail.slice(start);
   }
+  // An interrupted append may leave an incomplete final record.
+  if(tail.trim()) {let record;try {record=JSON.parse(tail);} catch {return;}yield record;}
+}
+export function compactRecord(record) {const {trace,...rest}=record;return rest;}
+export async function readRun(id,{compact=false}={}) {
+  const records=[];
+  for await(const record of streamRun(id))records.push(compact?compactRecord(record):record);
   return records;
+}
+export async function readRunHeader(id) {for await(const record of streamRun(id))return record;throw Error('Missing run header');}
+export async function readRunPosition(id,index) {
+  if(!Number.isInteger(index)||index<0)throw Error('Invalid replay position');
+  let count=0;
+  for await(const record of streamRun(id)) {
+    if(record.type==='header'&&index===0)return record.initialState;
+    if(record.type==='decision'&&++count===index)return record.state;
+  }
+  throw Error('Invalid replay position');
 }
 export async function listRuns({trash='active',onError=()=>{}}={}) {
   await mkdir(RUNS,{recursive:true});
@@ -32,13 +54,19 @@ export async function listRuns({trash='active',onError=()=>{}}={}) {
   const result=[];
   for(const name of entries) {
     try {
-      const records=await readRun(name.slice(0,-6));
-      if(!Array.isArray(records[0]?.config?.players)||records[0].config.players.length!==2||!records[0].config.players.every(p=>p&&typeof p.type==='string')||!Number.isFinite(Date.parse(records[0].createdAt))||records[0].id!==name.slice(0,-6)) throw Error('Invalid run header');
-      const metadata=await readMetadata(records[0].id);
+      let header,end,locks=0;const executions=[[],[]];
+      for await(const record of streamRun(name.slice(0,-6))) {
+        if(!header)header=record;
+        if(record.type==='end')end=record;
+        if(record.type==='decision') {
+          if(record.move)locks++;
+          if(record.execution&&!executions[record.actor].some(e=>JSON.stringify(e)===JSON.stringify(record.execution)))executions[record.actor].push(record.execution);
+        }
+      }
+      if(!Array.isArray(header?.config?.players)||header.config.players.length!==2||!header.config.players.every(p=>p&&typeof p.type==='string')||!Number.isFinite(Date.parse(header.createdAt))||header.id!==name.slice(0,-6)) throw Error('Invalid run header');
+      const metadata=await readMetadata(header.id);
       if(trash!=='all'&&metadata.trashed!==(trash==='trash'))continue;
-      const end=records.findLast(r=>r.type==='end');
-      result.push({metadata,id:records[0].id,createdAt:records[0].createdAt,players:records[0].config.players,executions:[0,1].map(actor=>records.filter(r=>r.type==='decision'&&r.actor===actor&&r.execution).map(r=>r.execution).filter((e,i,a)=>a.findIndex(x=>JSON.stringify(x)===JSON.stringify(e))===i)),status:end?.status??'incomplete',
-        winner:end?.winner,locks:records.filter(r=>r.type==='decision'&&r.move).length});
+      result.push({metadata,id:header.id,createdAt:header.createdAt,players:header.config.players,executions,status:end?.status??'incomplete',winner:end?.winner,locks});
     } catch {onError({id:name.slice(0,-6),error:'対局または管理情報を読み込めませんでした'});}
   }
   return result;
@@ -57,6 +85,11 @@ export function summarize(state,records) {
   });
 }
 export class Match {
+  static async savedSnapshot(id) {
+    const records=await readRun(id,{compact:true}),header=records[0],decisions=records.filter(r=>r.type==='decision'),end=records.findLast(r=>r.type==='end');
+    const match=Object.assign(new Match(),{id,header,config:header.config,records:decisions,state:end?.state??decisions.at(-1)?.state??header.initialState,busy:false,running:false,stopRequested:end?.status==='aborted'});
+    return {...match.snapshot(),archived:true};
+  }
   static async create(options={}) {
     let players=(options.players??[{},{}]).map((value,index)=>playerConfig({...value,...(options.capabilitySnapshots?.[index]?{capabilitySnapshot:options.capabilitySnapshots[index]}:{})}));
     if(players.length!==2) throw Error('Two player configurations required');
@@ -177,22 +210,24 @@ export class Match {
   }
   async finishDecision(supplied,transport) {
     const actor=this.state.active,record={type:'decision',index:this.records.length,actor,beforeHash:hashState(this.state)};
+    this.decisionController=new AbortController();
     try {
       if(!legalMoves(this.state).length) throw new DecisionError('no-moves','No legal placements','forfeit');
-      const decision=supplied??await decide(this.state,this.config.players[actor],{baseUrl:this.baseUrl,memo:this.memos[actor],transport});
+      const decision=supplied??await decide(this.state,this.config.players[actor],{baseUrl:this.baseUrl,memo:this.memos[actor],transport,signal:this.decisionController.signal});
+      if(this.stopRequested)throw new DecisionError('user-stop','Decision cancelled by user','aborted',{trace:decision.trace,metrics:decision.metrics});
       Object.assign(record,decision);
       this.state=applyMove(this.state,decision.move).state;
       this.memos[actor]=decision.memo;
     } catch(e) {
       record.error={code:e.code??'internal',message:e.message,outcome:e.outcome??'invalid'};
       if(e.detail) {record.trace=e.detail.trace;record.metrics=e.detail.metrics;record.error.detail=e.detail.body??null;}
-      this.state.status=e.outcome==='forfeit'?'forfeit':'invalid';this.state.winner=e.outcome==='forfeit'?1-actor:null;this.state.reason=record.error.code;
+      if(this.stopRequested)record.error={...record.error,code:'user-stop',outcome:'aborted'};
+      this.state.status=record.error.outcome==='aborted'?'aborted':e.outcome==='forfeit'?'forfeit':'invalid';this.state.winner=e.outcome==='forfeit'&&!this.stopRequested?1-actor:null;this.state.reason=record.error.code;
     }
     if(this.stopRequested&&this.state.status==='playing') {this.state.status='aborted';this.state.winner=null;this.state.reason='user-stop';}
     record.state=clone(this.state);record.afterHash=hashState(this.state);
-    this.records.push(record);
-    try {await this.write(record);if(this.state.status!=='playing') await this.end();}
-    finally {this.busy=false;this.inputSince=performance.now();}
+    try {await this.write(record);this.records.push(compactRecord(record));if(this.state.status!=='playing') await this.end();}
+    finally {this.decisionController=null;this.busy=false;this.inputSince=performance.now();if(this.stopRequested&&this.state.status==='playing')await this.stop();}
     return record;
   }
   async run() {
@@ -205,6 +240,7 @@ export class Match {
   }
   async stop() {
     this.stopRequested=true;
+    this.decisionController?.abort();
     if(!this.busy&&this.state.status==='playing') {this.state.status='aborted';this.state.reason='user-stop';await this.end();}
   }
   snapshot() {

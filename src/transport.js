@@ -30,11 +30,11 @@ export function requestUrl(profileOrId,kind='completion') {
   return endpoint(profile,kind);
 }
 
-export async function requestJson(profileOrId,body,timeoutMs,{fetchImpl=globalThis.fetch,kind='completion'}={}) {
+export async function requestJson(profileOrId,body,timeoutMs,{fetchImpl=globalThis.fetch,kind='completion',signal:cancelSignal}={}) {
   const profile=typeof profileOrId==='string'?connectionProfile(profileOrId):profileOrId;
   let response,raw;
   let signal;
-  try {signal=AbortSignal.timeout(timeoutMs);} catch {throw new TransportError('configuration','Invalid request timeout');}
+  try {const timeout=AbortSignal.timeout(timeoutMs);signal=cancelSignal?AbortSignal.any([timeout,cancelSignal]):timeout;} catch {throw new TransportError('configuration','Invalid request timeout');}
   let headers;
   try {headers=mergeHeaders(profile);} catch(e) {if(e instanceof TransportError)throw e;throw new TransportError(e.code??'configuration',e.message);}
   try {
@@ -42,7 +42,7 @@ export async function requestJson(profileOrId,body,timeoutMs,{fetchImpl=globalTh
     raw=redactConnectionSecrets(await response.text(),[profile]);
   } catch(e) {
     if(e instanceof TransportError)throw e;
-    throw new TransportError(signal.aborted?'timeout':'connection',redactConnectionSecrets(e.message??String(e),[profile]));
+    throw new TransportError(cancelSignal?.aborted?'user-stop':signal.aborted?'timeout':'connection',redactConnectionSecrets(e.message??String(e),[profile]));
   }
   if(!response.ok)throw new TransportError('http',`HTTP ${response.status}`,{status:response.status,body:raw});
   try {

@@ -3,7 +3,7 @@ import {isAgentPlayer} from './agent-identity.js';
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
-import {Match,readRun,listRuns} from './match.js';
+import {Match,streamRun,readRunHeader,readRunPosition,listRuns,compactRecord} from './match.js';
 import {DEFAULT_PLAYER,DEFAULT_MODEL,QUICK_MODEL} from './players.js';
 import {TYPESAFE_MODEL,SAKURA_MODELS} from './providers.js';
 import {probeModel,probeConnection} from './probe.js';
@@ -15,6 +15,25 @@ const port=Number(process.env.PORT??3210),host='127.0.0.1',matches=new Map();
 let probeBusy=false;
 const web=fileURLToPath(new URL('../web/',import.meta.url));
 const json=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value));};
+function releaseMatch(match) {if(match.ended&&!match.busy&&!match.running)matches.delete(match.id);}
+function background(match,operation) {
+  operation.catch(e=>{match.runtimeError=e.message;console.error(e);}).finally(()=>releaseMatch(match));
+}
+async function replayJson(res,id) {
+  // Stream compact viewer records; full transcripts remain in the JSONL file.
+  let first=true;
+  for await(const record of streamRun(id)) {
+    if(res.destroyed)throw Error('Replay client disconnected');
+    if(first)res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
+    if(!res.write((first?'[':',')+JSON.stringify(compactRecord(record))))await new Promise((resolve,reject)=>{
+      res.once('drain',done);res.once('close',closed);
+      function done(){res.off('close',closed);resolve();}
+      function closed(){res.off('drain',done);reject(Error('Replay client disconnected'));}
+    });
+    first=false;
+  }
+  res.end(first?'[]':']');
+}
 function publicProbeResult(result) {
   const features=result.features?Object.fromEntries(Object.entries(result.features).map(([key,value])=>[key,{status:value.status}])):undefined;
   return {ok:result.ok,connectionId:result.connectionId??null,modelId:result.modelId??result.model??null,protocol:result.protocol??null,provider:result.provider??null,
@@ -64,31 +83,27 @@ const server=createServer(async(req,res)=>{
     }
     const metadataRoute=path.match(/^\/api\/runs\/([a-zA-Z0-9_-]+)\/metadata$/);
     if(metadataRoute&&['GET','PATCH'].includes(req.method)) {
-      const id=metadataRoute[1],records=await readRun(id);
+      const id=metadataRoute[1],header=await readRunHeader(id);
       if(req.method==='GET')return json(res,200,await readMetadata(id));
       const input=await body(req),match=matches.get(id);
       if(input.trashed===true&&match&&(match.busy||match.running||match.state.status==='playing'))return json(res,409,{error:'実行中・入力待ちの対局は停止してからゴミ箱へ移動してください'});
-      return json(res,200,await patchMetadata(id,input,records[0].config.players));
+      return json(res,200,await patchMetadata(id,input,header.config.players));
     }
     const replay=path.match(/^\/api\/runs\/([a-zA-Z0-9_-]+)$/);
-    if(req.method==='GET'&&replay) return json(res,200,await readRun(replay[1]));
+    if(req.method==='GET'&&replay) return await replayJson(res,replay[1]);
     if(req.method==='POST'&&path==='/api/matches') {
       const options=await body(req);
       if(probeBusy||[...matches.values()].some(m=>m.busy||m.running)) return json(res,409,{error:'Wait for the running decision before starting another match'});
-      delete options.initialState;
-      if(Array.isArray(options.players))options.players=options.players.map(player=>{
-        // Keep the retired field until playerConfig can reject it with migration guidance.
-        const allowed=['type','agentModel','reasoningEffort','connectionId','modelId','model','observation','preview','transitions','maxTokens','timeoutMs','temperature','thinking','decisionTokens','maxCalls','requestIntervalMs','responseFormat','responseParsing'];
-        return Object.fromEntries(allowed.filter(key=>Object.hasOwn(player,key)).map(key=>[key,player[key]]));
-      });
-      delete options.capabilitySnapshots;delete options.preflightCapabilities;delete options.baseUrl;
-      if(options.parent) {
-        const records=await readRun(options.parent.id),index=options.parent.index;
-        if(!Number.isInteger(index)||index<0||index>records.filter(r=>r.type==='decision').length) throw Error('Invalid replay position');
-        options.initialState=index===0?records[0].initialState:records.filter(r=>r.type==='decision')[index-1].state;
-      }
       probeBusy=true;
       try {
+        delete options.initialState;
+        if(Array.isArray(options.players))options.players=options.players.map(player=>{
+          // Keep the retired field until playerConfig can reject it with migration guidance.
+          const allowed=['type','agentModel','reasoningEffort','connectionId','modelId','model','observation','preview','transitions','maxTokens','timeoutMs','temperature','thinking','decisionTokens','maxCalls','requestIntervalMs','responseFormat','responseParsing'];
+          return Object.fromEntries(allowed.filter(key=>Object.hasOwn(player,key)).map(key=>[key,player[key]]));
+        });
+        delete options.capabilitySnapshots;delete options.preflightCapabilities;delete options.baseUrl;
+        if(options.parent)options.initialState=await readRunPosition(options.parent.id,options.parent.index);
         const match=await Match.create({...options,preflightCapabilities:true});matches.set(match.id,match);return json(res,201,match.snapshot());
       } finally {probeBusy=false;}
     }
@@ -96,7 +111,14 @@ const server=createServer(async(req,res)=>{
       .filter(m=>m.config.players.some(p=>isAgentPlayer(p.type))).map(m=>({...m.agentStatus(),players:m.config.players.map(p=>({type:p.type,model:p.model??null}))})));
     const agent=path.match(/^\/api\/agent\/matches\/([a-zA-Z0-9_-]+)(?:\/(status|preview|choose))?$/);
     if(agent) {
-      const match=matches.get(agent[1]);if(!match)return json(res,404,{error:'Match not loaded'});
+      const match=matches.get(agent[1]);
+      if(!match) {
+        if(req.method!=='GET')return json(res,404,{error:'Match not loaded'});
+        const saved=await Match.savedSnapshot(agent[1]);
+        if(!saved.header.config.players.some(p=>isAgentPlayer(p.type)))return json(res,400,{error:'This match has no session agent player'});
+        return json(res,200,{id:saved.id,status:saved.state.status==='playing'?'incomplete':saved.state.status,winner:saved.state.winner,reason:saved.state.reason??null,
+          active:saved.state.active,locks:saved.state.locks,remaining:saved.state.remaining,busy:false,ready:false,decisionId:null});
+      }
       if(!match.config.players.some(p=>isAgentPlayer(p.type)))return json(res,400,{error:'This match has no session agent player'});
       if(req.method==='GET'&&agent[2]==='status')return json(res,200,match.agentStatus());
       if(req.method==='GET'&&!agent[2])return json(res,200,await match.agentObserve());
@@ -104,14 +126,18 @@ const server=createServer(async(req,res)=>{
         const input=await body(req);
         if(probeBusy||[...matches.values()].some(m=>m!==match&&(m.busy||m.running)))return json(res,409,{error:'Another request is running'});
         const result=await match.agentAction(agent[2],input);
-        if(agent[2]==='choose')match.run().catch(e=>{match.runtimeError=e.message;console.error(e);});
+        if(agent[2]==='choose')background(match,match.run());
         return json(res,200,result);
       }
       return json(res,404,{error:'Unknown agent action'});
     }
     const target=path.match(/^\/api\/matches\/([a-zA-Z0-9_-]+)(?:\/(step|run|stop))?$/);
     if(target) {
-      const match=matches.get(target[1]);if(!match) return json(res,404,{error:'Match not loaded; open it in replay'});
+      const match=matches.get(target[1]);
+      if(!match) {
+        if(req.method==='GET'&&!target[2])return json(res,200,await Match.savedSnapshot(target[1]));
+        return json(res,404,{error:'Match not loaded; open it in replay'});
+      }
       if(req.method==='GET'&&!target[2]) return json(res,200,match.snapshot());
       if(req.method==='POST') {
         const input=await body(req);
@@ -122,14 +148,14 @@ const server=createServer(async(req,res)=>{
           if(match.isAgentTurn())return json(res,409,{error:'Session agent input is required; use the agent endpoint'});
           if(match.isHumanTurn()) {
             await match.step(input);
-            match.run().catch(e=>{match.runtimeError=e.message;console.error(e);});
+            background(match,match.run());
           } else {
             if(Object.keys(input).length) throw Error('Manual input requires a human player');
-            match.step().catch(e=>{match.runtimeError=e.message;console.error(e);});
+            background(match,match.step());
           }
         } else if(target[2]==='run') {
           if(match.busy||match.running) return json(res,409,{error:'Match already running'});
-          match.run().catch(e=>{match.runtimeError=e.message;console.error(e);});
+          background(match,match.run());
         } else return json(res,404,{error:'Unknown action'});
         return json(res,202,match.snapshot());
       }
@@ -143,6 +169,7 @@ const server=createServer(async(req,res)=>{
       }
     }
     json(res,404,{error:'Not found'});
-  } catch(e) {json(res,e.code==='ENOENT'?404:400,{error:e.message});}
+  } catch(e) {if(res.headersSent)res.destroy(e);else json(res,e.code==='ENOENT'?404:400,{error:e.message});}
+  finally {for(const match of matches.values())releaseMatch(match);}
 });
 server.listen(port,host,()=>console.log(`StackingBench: http://${host}:${port}`));

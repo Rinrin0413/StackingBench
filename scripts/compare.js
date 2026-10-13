@@ -1,5 +1,5 @@
 import {writeFile,mkdir} from 'node:fs/promises';
-import {readRun,RUNS,hashState} from '../src/match.js';
+import {readRunPosition,RUNS,hashState} from '../src/match.js';
 import {decide,playerConfig,DEFAULT_MODEL} from '../src/players.js';
 import {assertCapabilitySelection,capabilityTargetsForConfig,ensureCapabilitySnapshot} from '../src/capabilities.js';
 import {applyMove,createGame} from '../src/engine.js';
@@ -7,7 +7,7 @@ const args=process.argv.slice(2),option=(name,fallback)=>{const i=args.indexOf(`
 const run=option('run',null),index=Number(option('index','0'));
 const connection=option('connection',null),connectionA=option('connection-a',connection);
 let state=createGame({seeds:[101,202]});
-if(run) {const records=await readRun(run);state=index===0?records[0].initialState:records.filter(r=>r.type==='decision')[index-1]?.state;}
+if(run)state=await readRunPosition(run,index);
 if(!state||state.status!=='playing')throw Error('Select an active replay position');
 const report={kind:'single-position-comparison',at:new Date().toISOString(),parent:run?{id:run,index}:null,
   initialState:state,initialHash:hashState(state),memo:'',results:[],note:'One decision per condition; not a match or strength estimate.'};

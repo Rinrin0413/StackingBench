@@ -7,7 +7,7 @@ import {createGame,legalMoves,applyMove} from '../src/engine.js';
 import {DecisionError,playerConfig,decide} from '../src/players.js';
 const dir=await mkdtemp(join(tmpdir(),'stackingbench-test-'));
 process.env.STACKINGBENCH_RUNS=dir;
-const {Match,readRun,hashState,listRuns}=await import('../src/match.js');
+const {Match,readRun,hashState,listRuns,streamRun,readRunPosition}=await import('../src/match.js');
 after(async()=>{await rm(dir,{recursive:true,force:true});delete process.env.STACKINGBENCH_RUNS;});
 
 test('Claude Code stays on the manual session bridge without model requests or connection metadata',async t=>{
@@ -33,6 +33,9 @@ test('Claude Code stays on the manual session bridge without model requests or c
 test('saved match replays each path to identical hashes and final summary',async()=>{
   const m=await Match.create({maxLocks:4,players:[{transitions:8},{transitions:8}]});await m.run();
   const records=await readRun(m.id);let state=records[0].initialState;
+  assert.equal(records[0].format,3);
+  assert(m.records.every(r=>!Object.hasOwn(r,'trace')));
+  assert(records.filter(r=>r.type==='decision').every(r=>r.trace.previews.length>0));
   assert.equal(records[0].sourceHash.length,64);
   for(const r of records.filter(r=>r.type==='decision')) {
     assert.equal(hashState(state),r.beforeHash);state=applyMove(state,r.move).state;
@@ -82,6 +85,48 @@ test('in-flight decision lock rejects concurrent requests',async()=>{
 test('crash-truncated final JSONL fragment keeps previous records readable',async()=>{
   const m=await Match.create();await appendFile(m.path,'{"type":"decision"');
   assert.equal((await readRun(m.id)).length,1);
+});
+test('streaming reads preserve UTF-8, reject corrupt complete lines and load exact branch states',async()=>{
+  const m=await Match.create({players:[{type:'human'},{type:'human'}]});
+  const move=legalMoves(m.state)[0];await m.step({moveId:move.id,stateHash:hashState(m.state)});
+  await appendFile(m.path,JSON.stringify({type:'agent-event',text:'あ'.repeat(40000)})+'\r\n');
+  assert.deepEqual(await readRunPosition(m.id,0),m.header.initialState);
+  assert.deepEqual(await readRunPosition(m.id,1),m.state);
+  await assert.rejects(()=>readRunPosition(m.id,2),/Invalid replay position/);
+  const records=[];for await(const record of streamRun(m.id))records.push(record);
+  assert.equal(records.at(-1).text,'あ'.repeat(40000));
+  await appendFile(m.path,'invalid\n');await assert.rejects(()=>readRun(m.id),SyntaxError);
+});
+test('stop cancels a running request, records an abort and never locks the returned move',async()=>{
+  const m=await Match.create({players:[{type:'llm'},{}],preflightCapabilities:false}),initial=structuredClone(m.state);
+  let started;const ready=new Promise(resolve=>{started=resolve;});
+  const pending=m.step({transport:async(base,body,timeout,{signal})=>{
+    started();await new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));
+  }});
+  await ready;await m.stop();await pending;
+  assert.equal(m.busy,false);assert.equal(m.state.status,'aborted');assert.equal(m.state.winner,null);
+  assert.equal(m.state.locks,0);assert.deepEqual(m.state.players,initial.players);
+  const records=await readRun(m.id),decision=records[1];
+  assert.equal(decision.error.code,'user-stop');assert.equal(decision.error.outcome,'aborted');assert(!decision.move);
+  assert.equal(decision.trace.requests.length,1);assert.equal(decision.metrics.calls,1);
+  assert.equal(records.at(-1).status,'aborted');
+  assert.deepEqual(await Match.savedSnapshot(m.id),{...m.snapshot(),archived:true});
+});
+test('stop cancels request pacing before a correction is sent',async()=>{
+  const m=await Match.create({players:[{type:'llm',requestIntervalMs:60000},{}],preflightCapabilities:false});
+  m.baseUrl='http://localhost:5998';let calls=0;
+  const pending=m.step({transport:async()=>{calls++;return {choices:[{message:{content:'invalid'}}],usage:{prompt_tokens:1,completion_tokens:1}};}});
+  await new Promise(resolve=>setImmediate(resolve));await m.stop();await pending;
+  assert.equal(calls,1);assert.equal(m.state.status,'aborted');assert.equal(m.state.locks,0);
+  assert.equal((await readRun(m.id)).at(-1).summary[0].calls,1);
+});
+test('a transport that returns after stop cannot apply its selected move',async()=>{
+  const m=await Match.create({players:[{type:'llm'},{}],preflightCapabilities:false});let release,started;
+  const ready=new Promise(resolve=>{started=resolve;});
+  const pending=m.step({transport:()=>new Promise(resolve=>{release=resolve;started();})});
+  await ready;
+  await m.stop();release({choices:[{message:{content:JSON.stringify({action:'choose',move:legalMoves(m.state)[0].id})}}],usage:{prompt_tokens:1,completion_tokens:1}});
+  await pending;assert.equal(m.state.locks,0);assert.equal(m.state.status,'aborted');assert.equal(m.records[0].metrics.completionTokens,1);
 });
 
 test('human waits without generating, validates input, persists HOLD path and exact replay',async()=>{
@@ -181,7 +226,7 @@ test(`${agentType} session waits, previews within a persistent budget, and logs 
   const accepted=await m.agentAction('choose',response);
   assert.equal(accepted.acceptedDecisionId,root.decisionId);assert.equal(m.state.locks,1);
   assert.equal(m.records[0].metrics.transitions,1);assert.equal(m.records[0].metrics.completionTokens,null);
-  assert.equal(m.records[0].metrics.calls,0);assert.equal(m.records[0].trace.agentModel.value,'test-agent');
+  assert.equal(m.records[0].metrics.calls,0);assert.equal((await readRun(m.id)).find(r=>r.type==='decision').trace.agentModel.value,'test-agent');
   const next=await m.agentObserve();assert.notEqual(next.decisionId,root.decisionId);assert.equal(next.observation.memo,response.memo);
   assert.equal(next.preview.used,0);
   await assert.rejects(()=>m.agentAction('choose',response),/Stale/);assert.equal(m.state.locks,1);
@@ -281,7 +326,7 @@ test(`${agentType} bridge records a single model identity and replays the select
   await m.agentAction('choose',{decisionId:root.decisionId,moveId:move.id});
   assert.equal(m.records[0].execution.model,defaultModel);
   assert(!Object.hasOwn(m.records[0].execution,'reasoningEffort'));
-  assert.equal(m.records[0].trace.source,`${agentType}-session`);
+  assert.equal((await readRun(m.id)).find(r=>r.type==='decision').trace.source,`${agentType}-session`);
   assert.equal(m.records[0].metrics.calls,0);
   assert.deepEqual(applyMove(m.header.initialState,m.records[0].move).state,m.state);
   const next=await m.agentObserve();

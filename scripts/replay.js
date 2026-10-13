@@ -1,11 +1,18 @@
 import assert from 'node:assert/strict';
-import {readRun,hashState} from '../src/match.js';
+import {streamRun,hashState} from '../src/match.js';
 import {applyMove} from '../src/engine.js';
 if(process.argv[2]==='--')process.argv.splice(2,1);
 const id=process.argv[2];if(!id) throw Error('Usage: pnpm run replay -- RUN_ID');
-const records=await readRun(id);let state=records[0].initialState,count=0;
-assert.equal(hashState(state),records[0].initialHash);
-for(const record of records.filter(r=>r.type==='decision')) {
+let state,count=0;
+for await(const record of streamRun(id)) {
+  if(!state) {state=record.initialState;assert.equal(hashState(state),record.initialHash);continue;}
+  if(record.type==='end') {
+    if(record.status==='aborted'&&state.status==='playing') {state.status='aborted';state.reason='user-stop';state.winner=null;}
+    assert.equal(hashState(state),record.stateHash);
+    if(record.state)assert.deepEqual(state,record.state);
+    continue;
+  }
+  if(record.type!=='decision')continue;
   assert.equal(hashState(state),record.beforeHash);
   if(record.move&&!record.error) state=applyMove(state,record.move).state;
   if(record.error||record.state.status==='aborted') {
@@ -13,10 +20,5 @@ for(const record of records.filter(r=>r.type==='decision')) {
   }
   assert.deepEqual(state,record.state);assert.equal(hashState(state),record.afterHash);count++;
 }
-const end=records.findLast(r=>r.type==='end');
-if(end) {
-  if(end.status==='aborted'&&state.status==='playing') {state.status='aborted';state.reason='user-stop';state.winner=null;}
-  assert.equal(hashState(state),end.stateHash);
-  if(end.state)assert.deepEqual(state,end.state);
-}
+assert(state,'Missing run header');
 console.log(`Verified ${count} decisions: ${id}`);

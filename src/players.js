@@ -142,8 +142,8 @@ export function validateTypeSafeChoice(answer,ids) {
     !ids.every(id=>Object.hasOwn(probs,id)&&valid(probs[id]))||Math.abs(Object.values(probs).reduce((a,b)=>a+b,0)-1)>0.01||
     ids.some(id=>probs[id]>probs[answer.choice]+1e-6))throw responseError('invalid-response','Invalid TypeSafe probability distribution');
 }
-export async function completion(baseUrl,body,timeoutMs) {
-  try {return await requestJson(connectionForLegacyEndpoint(baseUrl),body,timeoutMs);}
+export async function completion(baseUrl,body,timeoutMs,options) {
+  try {return await requestJson(connectionForLegacyEndpoint(baseUrl),body,timeoutMs,options);}
   catch(e) {
     if(e instanceof DecisionError)throw e;
     if(e instanceof TransportError)throw new DecisionError(e.code,e.message,'invalid',e.detail);
@@ -151,8 +151,8 @@ export async function completion(baseUrl,body,timeoutMs) {
   }
 }
 
-export async function completionForConnection(connection,body,timeoutMs) {
-  try {return await requestJson(connection,body,timeoutMs);}
+export async function completionForConnection(connection,body,timeoutMs,options) {
+  try {return await requestJson(connection,body,timeoutMs,options);}
   catch(e) {
     if(e instanceof DecisionError)throw e;
     if(e instanceof TransportError)throw new DecisionError(e.code,e.message,'invalid',e.detail);
@@ -160,11 +160,13 @@ export async function completionForConnection(connection,body,timeoutMs) {
   }
 }
 const nextRequestAt=new Map();
-async function paceRequest(endpoint,interval) {
+async function paceRequest(endpoint,interval,signal) {
   if(!interval)return 0;
   const now=performance.now(),wait=Math.max(0,(nextRequestAt.get(endpoint)??now)-now);
-  nextRequestAt.set(endpoint,now+wait+interval);
-  if(wait)await delay(wait);
+  const reserved=now+wait+interval;
+  nextRequestAt.set(endpoint,reserved);
+  try {if(wait)await delay(wait,undefined,{signal});}
+  catch(e) {if(nextRequestAt.get(endpoint)===reserved)nextRequestAt.delete(endpoint);throw e;}
   return wait;
 }
 function decisionConnection(config,baseUrl) {
@@ -180,34 +182,48 @@ function traceSafe(value,connection) {
   try {return JSON.parse(redactConnectionSecrets(JSON.stringify(value),[connection]));}
   catch {return null;}
 }
-export async function llmDecision(game,config,{baseUrl=process.env.LLM_BASE_URL??'http://localhost:8082',memo='',transport=completion}={}) {
+export function traceRequest(trace,index) {
+  const record=trace.requests[index];
+  if(trace.requestEncoding!=='messages-delta-v1'||!record.request.messages)return record.request;
+  const messages=[];
+  for(const previous of trace.requests.slice(0,index+1)) {
+    if(previous.messageOffset!==messages.length)throw Error('Invalid transcript message offset');
+    messages.push(...previous.request.messages);
+  }
+  return {...record.request,messages};
+}
+export async function llmDecision(game,config,{baseUrl=process.env.LLM_BASE_URL??'http://localhost:8082',memo='',transport=completion,signal}={}) {
   const connection=decisionConnection(config,baseUrl),traceEndpoint=connection.publicEndpoint?connection.legacyBaseUrl:undefined;
   const start=performance.now(),moves=legalMoves(game),session=config.type==='llm-preview'?new PreviewSession(game,config.transitions):null;
   const typesafe=connection.protocol==='typesafe-jev-choice'||config.provider==='typesafe';
   const messages=[{role:'system',content:systemPrompt(config,game.rules)},{role:'user',content:JSON.stringify(observe(game,moves,memo))}];
-  const trace={requests:[],previews:[]};
+  const trace={requestEncoding:'messages-delta-v1',requests:[],previews:[]};
   const metrics={elapsedMs:0,pacingMs:0,transitions:0,calls:0,promptTokens:0,completionTokens:0,usageMissing:0,invalidResponses:0,cost:null};
-  let spent=0,errors=0;
+  let spent=0,errors=0,messagesRecorded=0;
   const finish=()=>{metrics.elapsedMs=performance.now()-start;metrics.transitions=session?.used??0;metrics.estimatedCostJpy=connection.legacyProvider==='sakura'?estimatedCost(config.modelId??config.model,metrics.promptTokens,metrics.completionTokens):null;trace.previews=session?.history??[];};
   try {
     for(let call=0;call<config.maxCalls;call++) {
+      signal?.throwIfAborted();
       const available=typesafe?Infinity:config.decisionTokens-spent;
       if(available<32) throw new DecisionError('token-budget','Decision generation budget exhausted','forfeit');
       let body;
       if(typesafe)body=buildTypeSafeRequest(config,game,observe(game,moves,memo),typesafeInstructions(game.rules)+(errors?' Previous response was invalid. Select an option from the supplied criteria.':''),Object.fromEntries(moves.map(m=>[m.id,`Execute the legal placement with id ${m.id} in observation.legalMoves.`])));
       else body=buildChatRequest({...config,connection},messages,ACTION_SCHEMA,available);
-      const pacingKey=connection.id+':'+connection.baseUrl,pacingMs=await paceRequest(pacingKey,config.requestIntervalMs);
+      const pacingKey=connection.id+':'+connection.baseUrl,pacingMs=await paceRequest(pacingKey,config.requestIntervalMs,signal);
       metrics.pacingMs+=pacingMs;
-      const record={request:body,provider:config.provider??connection.legacyProvider,connectionId:connection.id,modelId:config.modelId??config.model,protocol:connection.protocol,
+      signal?.throwIfAborted();
+      const request=body.messages?{...body,messages:body.messages.slice(messagesRecorded)}:body;
+      const record={request,...(body.messages?{messageOffset:messagesRecorded}:{}),provider:config.provider??connection.legacyProvider,connectionId:connection.id,modelId:config.modelId??config.model,protocol:connection.protocol,
         ...(traceEndpoint?{endpoint:traceEndpoint}:{}),endpointIdentity:endpointIdentity(connection),endpointFingerprint:endpointIdentity(connection).kind==='endpoint-fingerprint'?endpointIdentity(connection).value:null,
         routingPolicy:config.routingPolicy??connection.routingPolicy??null,pacingMs,startedAt:new Date().toISOString()}; trace.requests.push(record);metrics.calls++;
+      messagesRecorded=messages.length;
       const callStart=performance.now(); let data;
       try {
-        data=transport===completion?await completionForConnection(connection,body,config.timeoutMs):await transport(connection.legacyBaseUrl,body,config.timeoutMs);
+        data=transport===completion?await completionForConnection(connection,body,config.timeoutMs,{signal}):await transport(connection.legacyBaseUrl,body,config.timeoutMs,{signal});
         record.response=traceResponse(data,connection);
         record.observedRouting=connection.id==='openrouter'||connection.routingPolicy?observedRoutingMetadata(data):{status:'unknown',reason:'not-an-observed-routing-connection'};
       }
-      catch(e) {record.error={code:e.code??'connection',message:redactConnectionSecrets(e.message??String(e),[connection]),detail:traceSafe(e.detail,connection)};metrics.usageMissing++;metrics.promptTokens=null;metrics.completionTokens=null;throw e;}
+      catch(e) {record.error={code:signal?.aborted?'user-stop':e.code??'connection',message:redactConnectionSecrets(e.message??String(e),[connection]),detail:traceSafe(e.detail,connection)};metrics.usageMissing++;metrics.promptTokens=null;metrics.completionTokens=null;throw e;}
       finally {record.elapsedMs=performance.now()-callStart;}
       const usage=extractUsage(data),knownUsage=Number.isFinite(usage?.completion_tokens)&&Number.isFinite(usage?.prompt_tokens);
       if(knownUsage) {
@@ -244,7 +260,8 @@ export async function llmDecision(game,config,{baseUrl=process.env.LLM_BASE_URL?
     throw new DecisionError('call-budget','Decision API call budget exhausted','forfeit');
   } catch(e) {
     finish();
-    if(!(e instanceof DecisionError)) e=new DecisionError('internal',e.message);
+    if(signal?.aborted)e=new DecisionError('user-stop','Decision cancelled by user','aborted',e.detail);
+    else if(!(e instanceof DecisionError)) e=new DecisionError('internal',e.message);
     e.detail={...e.detail,trace,metrics};throw e;
   }
 }

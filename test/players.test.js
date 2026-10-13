@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createGame,legalMoves} from '../src/engine.js';
-import {llmDecision,playerConfig,searchDecision,systemPrompt,DecisionError} from '../src/players.js';
+import {llmDecision,playerConfig,searchDecision,systemPrompt,DecisionError,traceRequest} from '../src/players.js';
 const reply=(value,{finish='stop',usage={prompt_tokens:100,completion_tokens:20}}={})=>({choices:[{message:{content:typeof value==='string'?value:JSON.stringify(value)},finish_reason:finish}],usage});
 test('baseline deterministic selection, fixed budget and no live mutation',async()=>{
   const g=createGame(),config=playerConfig({transitions:12});const a=await searchDecision(g,config),b=await searchDecision(g,config);
@@ -66,4 +66,26 @@ test('request pacing applies to correction calls and is recorded separately',asy
   assert(d.trace.requests[1].pacingMs>0);assert(d.metrics.pacingMs>0);
   assert.equal(d.metrics.pacingMs,d.trace.requests[1].pacingMs);
   assert.throws(()=>playerConfig({requestIntervalMs:-1}),/requestIntervalMs/);
+});
+test('preview transcripts grow linearly and reconstruct every wire request exactly',async()=>{
+  const game=createGame(),move=legalMoves(game)[0].id,wire=[];
+  const decision=await llmDecision(game,playerConfig({type:'llm-preview'}),{transport:async(base,body)=>{
+    wire.push(structuredClone(body));
+    return reply(wire.length<=32?{action:'preview',node:'root',move}:{action:'choose',move});
+  }});
+  assert.equal(decision.metrics.transitions,32);
+  assert.equal(decision.trace.requests.length,33);
+  for(let i=0;i<wire.length;i++)assert.deepEqual(traceRequest(decision.trace,i),wire[i]);
+  assert.equal(decision.trace.requests.reduce((sum,r)=>sum+r.request.messages.length,0),wire.at(-1).messages.length);
+  assert(JSON.stringify(decision.trace).length<JSON.stringify(wire).length/4);
+  const legacy={requests:[{request:wire[0]},{request:wire[1]}]};
+  assert.deepEqual(traceRequest(legacy,1),wire[1]);
+});
+test('repair prompts are included once and can reconstruct the corrected request',async()=>{
+  const game=createGame(),move=legalMoves(game)[0].id,wire=[];
+  const decision=await llmDecision(game,playerConfig({type:'llm'}),{transport:async(base,body)=>{
+    wire.push(structuredClone(body));return reply(wire.length===1?'invalid':{action:'choose',move});
+  }});
+  assert.deepEqual(traceRequest(decision.trace,1),wire[1]);
+  assert.equal(decision.trace.requests[1].request.messages.length,2);
 });

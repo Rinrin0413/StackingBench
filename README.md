@@ -136,6 +136,12 @@ pnpm run check
 
 `runs/` に対局JSONL、probe・batch・position比較JSONが保存されます。Git対象外です。対局JSONLはheader、decision、endの順に追記。各decisionは設定済みプロンプト、要求/応答、usage、試し読み履歴、選択ID、操作列、盤面、ハッシュ、説明・メモ、時間とエラーを保存します。headerにルール、seed、完全な初期状態、ソースハッシュと取得できたGitリビジョンを保存します。LLM 条件には `connectionId`、`modelId`、protocol、capability snapshot、structured-output / reasoning policy、request extension を保存します。custom/internal endpoint の raw URL と credential は保存せず、同一 endpoint 識別用の fingerprint を使います。
 
+新規ログは保存形式v3です。LLMの `trace.requestEncoding: messages-delta-v1` では、各要求の `request.messages` は前回以降の追加分だけを持ち、`messageOffset` が会話内の開始位置を示します。`src/players.js` の `traceRequest(trace, index)` で指定呼出しの完全な要求を復元できます。旧形式の全会話要求も読み込めます。要求の他の設定、応答、usage、修正プロンプト、試し読み結果は省略しません。
+
+保存済みtraceはライブ対局のメモリに残さず、終了・停止した対局は保存完了後にサーバーのMapから削除します。終了後の状態取得は保存ログから応答します。一覧・検証CLI・分岐元の読込はJSONLを行単位で処理し、リプレイHTTP応答もレコード単位で送信します。`GET /api/runs/:id` は画面用にtraceを省略し、完全なtraceはローカルJSONLから取得します。明示停止では実行中のモデル要求と呼出し間の待機を中断し、未確定の手を適用せず `user-stop` / `aborted` として保存します。
+
+ローカル閲覧APIと専用エージェントAPIの間に認証・権限分離はありません。人間向けライブ観測の伏せ字は対局の閲覧権限を隔離する仕組みではなく、`GET /api/runs/:id` の完全状態や、人間を含まない対局の `GET /api/matches/:id` にはseed・乱数状態・非公開NEXTが含まれます。同じマシン上でAPIや保存ファイルを読めるエージェントに対して、情報の秘匿を保証しません。対戦時は各プレイヤーの手順どおり専用の `scripts/agent.js` だけを使います。
+
 ライブラリの管理情報は `runs/metadata/<対局ID>.json` に別保存します。タイトル・モデル表示の訂正・お気に入り・ゴミ箱状態は、元の JSONL、対局設定、再現検証、エージェントへの観測を変更しません。バックアップ時は JSONL と `metadata/` を一緒にコピーしてください。既存ログは管理情報なしでもそのまま利用できます。
 
 旧管理情報の `reasoningEffort` は値にかかわらず読み込み時に無視します。読み込みだけではファイルを変更しませんが、お気に入りの変更なども含め、次の PATCH で保存ファイルから除去します。元の対局 JSONL は変更しません。

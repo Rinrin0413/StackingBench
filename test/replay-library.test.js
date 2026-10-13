@@ -60,6 +60,19 @@ test('metadata HTTP lifecycle preserves logs, compatibility and public informati
   assert.equal((await request(url,'PATCH',patch,{'Content-Type':'text/plain'})).status,415);
   assert.equal(await readFile(join(root,`${id}.jsonl`),'utf8'),before);
   await request(`/api/matches/${id}/stop`,'POST',{});
+  const archived=await request(`/api/matches/${id}`);
+  assert.equal(archived.status,200);assert.equal(archived.value.archived,true);assert.equal(archived.value.state.status,'aborted');
+  const completedAgent=(await request(`/api/agent/matches/${id}/status`)).value;
+  assert.equal(completedAgent.status,'aborted');assert.equal(completedAgent.ready,false);
+  assert(!(await request('/api/agent/matches')).value.some(m=>m.id===id));
+  const forks=await Promise.all(Array.from({length:2},()=>request('/api/matches','POST',{parent:{id,index:0},players:[{type:'human'},{type:'human'}]})));
+  assert.deepEqual(forks.map(r=>r.status).sort(),[201,409]);
+  const fork=forks.find(r=>r.status===201).value;
+  await request(`/api/matches/${fork.id}/stop`,'POST',{});
+  await rm(join(root,`${fork.id}.jsonl`));
+  const invalidFork=await request('/api/matches','POST',{parent:{id,index:999}});assert.equal(invalidFork.status,400);
+  const afterError=await request('/api/matches','POST',{players:[{type:'human'},{type:'human'}]});assert.equal(afterError.status,201);
+  await request(`/api/matches/${afterError.value.id}/stop`,'POST',{});await rm(join(root,`${afterError.value.id}.jsonl`));
   const original=await readFile(join(root,`${id}.jsonl`),'utf8');
   const metadataFile=join(root,'metadata',`${id}.json`);
   for(const reasoningEffort of ['high','unlimited',null,123,{old:'value'}]) {
