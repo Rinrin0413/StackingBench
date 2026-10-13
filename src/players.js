@@ -248,6 +248,6 @@ export async function llmDecision(game,config,{baseUrl=process.env.LLM_BASE_URL?
   }
 }
 export async function decide(game,config,options={}) {
-  if(['human','codex','agy','opencode','claude'].includes(config.type)) throw Error('External player input required');
+  if(config.type==='human'||isAgentPlayer(config.type)) throw Error('External player input required');
   return config.type==='search'?searchDecision(game,config):llmDecision(game,config,options);
 }

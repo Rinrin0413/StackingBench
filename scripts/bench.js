@@ -2,6 +2,7 @@ import {writeFile,mkdir} from 'node:fs/promises';
 import {Match,RUNS} from '../src/match.js';
 import {DEFAULT_MODEL,playerConfig} from '../src/players.js';
 import {probeConnection} from '../src/probe.js';
+import {isAgentPlayer} from '../src/agent-identity.js';
 
 const args=process.argv.slice(2),option=(name,fallback)=>{const i=args.indexOf(`--${name}`);return i<0?fallback:args[i+1];};
 const seeds=option('seeds','101').split(',').map(Number),swap=args.includes('--swap');
@@ -10,7 +11,7 @@ const connection=option('connection',null),connectionA=option('connection-a',con
 const settings={model,requestIntervalMs:Number(option('request-interval-ms','0')),transitions:Number(option('transitions','32')),maxTokens:Number(option('max-tokens','2048')),thinking:option('thinking','server-default'),
   decisionTokens:Number(option('decision-tokens','8192')),timeoutMs:Number(option('timeout-ms','120000')),maxCalls:Number(option('max-calls','34'))};
 const players=[{...settings,...(connectionA?{connectionId:connectionA}:{}),modelId:option('model-a',model),type:option('a','search')},{...settings,...(connectionB?{connectionId:connectionB}:{}),modelId:option('model-b',model),type:option('b','search')}].map(playerConfig);
-if(players.some(p=>['human','codex','agy','opencode','claude'].includes(p.type)))throw Error('Interactive players require the browser; batch mode supports search and LLM players only');
+if(players.some(p=>p.type==='human'||isAgentPlayer(p.type)))throw Error('Interactive players require the browser; batch mode supports search and LLM players only');
 const preflight=args.includes('--probe')||args.includes('--preflight'),capabilitySnapshots=[];
 if(preflight) {
   const seen=new Map();
