@@ -35,9 +35,7 @@ pnpm run agent -- wait RUN_ID --after PREVIOUS_DECISION_ID --timeout-ms 50000
 1手ずつ判断します。必要なら以下のようにJSONを標準入力で送り、試し読みします。共有の一時ファイルを使わないため、他のセッションとファイルが競合しません。
 
 ```bash
-pnpm run agent -- preview RUN_ID --file - <<'JSON'
-{"decisionId":"観測のdecisionId","node":"root","moveId":"m0012","requestId":"preview-1"}
-JSON
+echo '{"decisionId":"観測のdecisionId","node":"root","moveId":"m0012","requestId":"preview-1"}' | pnpm run agent -- preview RUN_ID --file -
 ```
 
 `node` は `root` または以前に返されたノードID。深さ、未知NEXT、未来のおじゃま穴の境界は既存の試し読みと同じです。`requestId` が同じで内容も同じなら保存済みの結果を返し、予算を再消費しません。別の試し読みでは新しいIDを使います。省略時はCLIがUUIDを生成しますが、通信失敗後に同じ要求を再送する場合は送信するJSONにIDを指定してください。観測を再取得しても予算はリセットされません。
@@ -45,9 +43,7 @@ JSON
 選択が決まったら、**最新のルート観測**の合法手IDを送ります。深いノードでだけ有効なIDを最終手に使いません。
 
 ```bash
-pnpm run agent -- choose RUN_ID --file - <<'JSON'
-{"decisionId":"観測のdecisionId","moveId":"m0012","reason":"短い選択理由","memo":"次の判断への短いメモ","agentModel":"GPT-6 Astra","reasoningEffort":"high"}
-JSON
+echo '{"decisionId":"観測のdecisionId","moveId":"m0012","reason":"短い選択理由","memo":"次の判断への短いメモ","agentModel":"GPT-6 Astra","reasoningEffort":"high"}' | pnpm run agent -- choose RUN_ID --file -
 ```
 
 `reason` は最大400文字、`memo` は240文字、`agentModel` は160文字です。モデル名・推論レベルが分かる場合は `agentModel` と `reasoningEffort` に実際の値を指定します。推論レベルは `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max` / `ultra` を受け付け、小文字で保存します。不明なら推測せず省略します。省略した項目は対局開始時の記録用設定を使い、明示的なnullは未記録として扱います。途中でモデルや推論レベルを変更した場合は、その後の各判断で実際の値を送ってください。

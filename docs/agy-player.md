@@ -28,9 +28,7 @@ node scripts/agent.js wait RUN_ID --after PREVIOUS_DECISION_ID --timeout-ms 5000
 試し読み用JSONを標準入力で送る例（共有の一時ファイルを使わず、他のセッションとのファイル競合を避けます）:
 
 ```bash
-node scripts/agent.js preview RUN_ID --file - <<'JSON'
-{"decisionId":"現在のdecisionId","node":"root","moveId":"m0012","requestId":"preview-1"}
-JSON
+echo '{"decisionId":"現在のdecisionId","node":"root","moveId":"m0012","requestId":"preview-1"}' | node scripts/agent.js preview RUN_ID --file -
 ```
 
 深い試し読みでは返されたノードIDとそのノードの合法手を使います。未知情報やターン末の境界で停止し、予算は観測を取り直しても回復しません。同じ要求の再送には同じ `requestId` を使ってください。
@@ -38,9 +36,7 @@ JSON
 確定用JSONの例:
 
 ```bash
-node scripts/agent.js choose RUN_ID --file - <<'JSON'
-{"decisionId":"現在のdecisionId","moveId":"m0012","reason":"短い選択理由","memo":"次の判断へのメモ","agentModel":"Gemini"}
-JSON
+echo '{"decisionId":"現在のdecisionId","moveId":"m0012","reason":"短い選択理由","memo":"次の判断へのメモ","agentModel":"Gemini"}' | node scripts/agent.js choose RUN_ID --file -
 ```
 
 確定には最新の **ルート観測** の合法手IDだけを使います。1個固定したら再度 `observe` を取り直し、7個固定して交代したら `wait` で待ちます。通信結果が不明なら観測を取り直し、固定済みか確認します。古い `decisionId` は拒否されます。
