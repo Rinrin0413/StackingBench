@@ -1,6 +1,6 @@
 import test,{after} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,appendFile} from 'node:fs/promises';
+import {mkdtemp,rm,appendFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createGame,legalMoves,applyMove} from '../src/engine.js';
@@ -49,6 +49,22 @@ test('same position branching keeps exact state and resets memos',async()=>{
     const m=await Match.create({initialState:state,players:[{type},{type}],parent:{id:'fixture',index:1},preflightCapabilities:false});
     assert.deepEqual(m.state,state);assert.deepEqual(m.memos,['','']);assert.equal(m.header.initialHash,hashState(state));await m.stop();
   }
+});
+test('v1 replay fixture keeps exact hashes and v1 previews when branched',async()=>{
+  const records=(await readFile(new URL('./fixtures/rules-v1-garbage.jsonl',import.meta.url),'utf8')).trim().split('\n').map(line=>JSON.parse(line));
+  const header=records[0],record=records[1];
+  assert.equal(header.initialState.rules.version,1);assert.equal(hashState(header.initialState),header.initialHash);
+  assert.equal(hashState(applyMove(header.initialState,record.move).state),record.afterHash);
+  assert.deepEqual(applyMove(header.initialState,record.move).state,records.at(-1).state);
+  const m=await Match.create({initialState:header.initialState,players:[{type:'search',transitions:1},{type:'search',transitions:1}],parent:{id:header.id,index:0}});
+  assert.equal(m.state.rules.version,1);
+  const decision=await m.step();assert.equal(decision.trace.previews[0].response.boundary,'unknown-garbage');
+  const modern=structuredClone(header.initialState);modern.rules.version=2;
+  const current=await Match.create({initialState:modern,players:[{type:'search',transitions:1},{type:'search',transitions:1}]});
+  const revised=await current.step();assert.equal(revised.trace.previews[0].response.boundary,'terminal');
+  assert.equal(revised.trace.evaluations[0].score,-100000);
+  const unsupported=structuredClone(modern);unsupported.rules.version=3;
+  await assert.rejects(()=>Match.create({initialState:unsupported}),/v1\/v2/);
 });
 test('unknown LLM conditions are probed before the run header is fixed',async()=>{
   let calls=0;

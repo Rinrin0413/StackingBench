@@ -1,11 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createGame,legalMoves} from '../src/engine.js';
-import {llmDecision,playerConfig,searchDecision,systemPrompt,DecisionError,traceRequest} from '../src/players.js';
+import {llmDecision,playerConfig,searchDecision,systemPrompt,DecisionError,traceRequest,evaluate} from '../src/players.js';
 const reply=(value,{finish='stop',usage={prompt_tokens:100,completion_tokens:20}}={})=>({choices:[{message:{content:typeof value==='string'?value:JSON.stringify(value)},finish_reason:finish}],usage});
 test('baseline deterministic selection, fixed budget and no live mutation',async()=>{
   const g=createGame(),config=playerConfig({transitions:12});const a=await searchDecision(g,config),b=await searchDecision(g,config);
   assert.equal(a.move.id,b.move.id);assert.equal(a.metrics.transitions,12);assert.deepEqual(g,createGame());assert.equal(a.metrics.calls,0);
+});
+test('search scores certain garbage losses as terminal while v1 keeps its unknown penalty',async()=>{
+  for(const version of [1,2]) {
+    const game=createGame();game.rules.version=version;game.players[0].pending=[24];
+    const decision=await searchDecision(game,playerConfig({transitions:8}));
+    assert.equal(decision.metrics.transitions,4);
+    assert(decision.trace.evaluations.every(e=>e.score===(version===2?-100000:-50000)));
+    assert(decision.trace.previews.every(p=>p.response.boundary===(version===2?'terminal':'unknown-garbage')));
+  }
+  assert.equal(evaluate(null,1,{status:'finished',winner:0}),-100000);
+  assert.equal(evaluate(null,0,{status:'finished',winner:0}),100000);
+  assert.equal(evaluate(null,0,{received:1}),-50000);
 });
 test('LLM direct has no preview and sends public root candidates without outcomes',async()=>{
   const g=createGame(),id=legalMoves(g)[0].id;

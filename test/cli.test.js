@@ -4,7 +4,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
-import {mkdtemp,writeFile,appendFile,rm} from 'node:fs/promises';
+import {mkdtemp,writeFile,appendFile,copyFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createGame} from '../src/engine.js';
@@ -79,4 +79,9 @@ test('large logs remain listable, verifiable and branchable within a 32 MB heap'
   const inspection=await execute(process.execPath,['--max-old-space-size=32','--input-type=module','-e',
     "import assert from 'node:assert/strict';import {listRuns,readRun,readRunPosition} from './src/match.js';assert.equal((await listRuns())[0].id,'large');assert.equal((await readRun('large',{compact:true})).length,193);assert.equal((await readRunPosition('large',0)).locks,0);"],options);
   assert.equal(inspection.stderr,'');
+});
+test('replay CLI verifies the saved v1 garbage fixture using the current engine',async t=>{
+  const dir=await mkdtemp(join(tmpdir(),'stackingbench-v1-replay-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+  await copyFile(new URL('./fixtures/rules-v1-garbage.jsonl',import.meta.url),join(dir,'rules-v1-garbage.jsonl'));
+  assert.match(await pnpm('replay',['--','rules-v1-garbage'],{STACKINGBENCH_RUNS:dir}),/Verified 1 decisions/);
 });

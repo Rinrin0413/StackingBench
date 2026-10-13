@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import {RULES,TYPES,emptyBoard,createGame,legalMoves,applyMove,replayPath,cells,rotate,fits,spinType,motion,attackFor,clone,pendingCount} from '../src/engine.js';
 import {PreviewSession,observe,knownState} from '../src/observation.js';
+const garbageFixtures=JSON.parse(await readFile(new URL('./fixtures/garbage-preview.json',import.meta.url),'utf8'));
 
 test('independent seeded streams produce reproducible seven-piece bags',()=>{
   const game=createGame();assert.deepEqual(game,createGame());assert.notDeepEqual(game.players[0].pieceRng,game.players[1].pieceRng);
@@ -81,6 +83,12 @@ test('line clear keeps uncancelled pending and preserves unconsumed hole RNG',()
   const {state,result}=applyMove(g,move);assert.deepEqual(state.players[0].pending,[6,2]);assert.equal(result.received,0);
   assert.deepEqual(state.players[0].garbageRng,rng);
 });
+test('a clearing preview does not declare loss from garbage that will not rise',()=>{
+  const {g,move}=fourClear();g.players[0].pending=[100];
+  const preview=new PreviewSession(g,1).run('root',move.id);
+  assert.equal(preview.boundary,null);assert.equal(preview.result.received,0);
+  assert.equal(preview.observation.status,'playing');assert.equal(preview.observation.self.pending,86);
+});
 test('nonclear raises all garbage once with reproducible holes',()=>{
   const g=createGame();g.players[0].pending=[2,1];const move=legalMoves(g)[0];
   const a=applyMove(g,move),b=applyMove(g,move);assert.deepEqual(a,b);assert.equal(a.result.received,3);assert.equal(a.result.holes.length,3);
@@ -125,6 +133,27 @@ test('unknown garbage boundary consumes one transition and reveals no holes or b
   const g=createGame();g.players[0].pending=[2];const s=new PreviewSession(g,1);
   const r=s.run('root',legalMoves(g)[0].id);assert.equal(r.boundary,'unknown-garbage');assert.equal(r.observation,null);assert(!Object.hasOwn(r.result,'holes'));
   assert.throws(()=>s.run('root',legalMoves(g)[0].id),/budget/);assert.equal(s.used,1);
+});
+for(const fixture of garbageFixtures)test(`v2 garbage preview fixture: ${fixture.name}`,()=>{
+  const game=createGame({first:fixture.actor??0,maxLocks:fixture.maxLocks??280}),actor=game.active,p=game.players[actor];
+  assert.equal(game.rules.version,2);p.current='O';p.pending=[fixture.received];
+  for(const [x,y] of fixture.occupied)p.board[y][x]='G';
+  const move=legalMoves(game).find(m=>!m.useHold&&m.cells.every(([x,y])=>x>=7&&y>=20));assert(move);
+  const before=clone(game),session=new PreviewSession(game,1),preview=session.run('root',move.id);
+  assert.equal(preview.boundary,fixture.boundary);assert.equal(preview.result.reason??null,fixture.reason);
+  assert.equal(preview.observation,null);assert.equal(session.used,1);assert.equal(session.nodes.get(preview.node).state,null);
+  assert(!Object.hasOwn(preview.result,'holes'));assert(!Object.hasOwn(preview.result,'board'));assert.deepEqual(game,before);
+  if(fixture.reason) {
+    assert.equal(preview.result.status,'finished');assert.equal(preview.result.winner,1-actor);
+    for(const seed of [1,12345,0xffffffff]) {
+      const altered=clone(game);altered.players[actor].garbageRng.value=seed;
+      const live=applyMove(altered,move);assert.equal(live.state.reason,fixture.reason);assert.equal(live.state.winner,1-actor);
+      assert.deepEqual(new PreviewSession(altered,1).run('root',move.id),preview);
+    }
+  }
+  const legacy=clone(game);legacy.rules.version=1;
+  const oldPreview=new PreviewSession(legacy,1).run('root',move.id);
+  assert.equal(oldPreview.boundary,'unknown-garbage');assert.equal(oldPreview.observation,null);assert(!Object.hasOwn(oldPreview.result,'status'));
 });
 test('preview stops at own turn boundary without observing opponent spawn',()=>{
   const g=createGame();g.remaining=1;const s=new PreviewSession(g);const r=s.run('root',legalMoves(g)[0].id);

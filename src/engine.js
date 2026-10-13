@@ -1,5 +1,5 @@
 // Pure, serialized state transitions. Coordinates use positive y downward.
-export const RULES = Object.freeze({version: 1, width: 10, height: 24, hidden: 4,
+export const RULES = Object.freeze({version: 2, width: 10, height: 24, hidden: 4,
   locksPerTurn: 7, maxLocks: 280, nextCount: 5,
   normal: [0,0,1,2,4], full: [0,2,4,6], mini: [0,0,1,6],
   combo: [0,0,1,1,2,2,3,3,4,4,5], b2bBonus: 1, perfectClear: 10});
@@ -171,7 +171,15 @@ export function applyMove(game,move,{simulation=false}={}) {
   }
   if(outgoing) opponent.pending.push(outgoing);
   const received=lines===0?pendingCount(p):0;
-  if(simulation&&received>0) return {state:null,boundary:'unknown-garbage',result:{actor,lines,spin,attack:score.attack,cancelled,sent:outgoing,received}};
+  if(simulation&&received>0) {
+    const result={actor,lines,spin,attack:score.attack,cancelled,sent:outgoing,received};
+    if(g.rules.version===2) {
+      const overflow=p.board.slice(0,received).some(row=>row.some(c=>c!=='.'));
+      const lockOut=received>g.rules.height-g.rules.hidden||p.board.slice(received,received+g.rules.hidden).some(row=>row.some(c=>c!=='.'));
+      if(overflow||lockOut)return {state:null,boundary:'terminal',result:{...result,status:'finished',winner:1-actor,reason:overflow?'garbage-overflow':'lock-out'}};
+    }
+    return {state:null,boundary:'unknown-garbage',result};
+  }
   const holes=[]; let overflow=false;
   for(let i=0;i<received;i++) {
     if(p.board.shift().some(c=>c!=='.')) overflow=true;

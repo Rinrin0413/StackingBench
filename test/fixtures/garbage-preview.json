@@ -1,0 +1,11 @@
+[
+  {"name":"safe rise remains unknown","received":1,"occupied":[],"boundary":"unknown-garbage","reason":null},
+  {"name":"locked piece stays below hidden rows after a large rise","received":18,"occupied":[],"boundary":"unknown-garbage","reason":null},
+  {"name":"locked piece enters the last hidden row","received":19,"occupied":[],"boundary":"terminal","reason":"lock-out"},
+  {"name":"cell stays just below hidden rows","received":1,"occupied":[[0,5]],"boundary":"unknown-garbage","reason":null},
+  {"name":"cell crosses into hidden rows","received":1,"occupied":[[0,4]],"boundary":"terminal","reason":"lock-out"},
+  {"name":"cell is pushed out at the top","received":5,"occupied":[[0,4]],"boundary":"terminal","reason":"garbage-overflow"},
+  {"name":"rise occupies hidden rows before lock limit","received":21,"occupied":[],"maxLocks":1,"boundary":"terminal","reason":"lock-out"},
+  {"name":"whole-board rise pushes out the locked piece","received":24,"occupied":[],"boundary":"terminal","reason":"garbage-overflow"},
+  {"name":"second actor loses with the correct winner","actor":1,"received":1,"occupied":[[0,4]],"boundary":"terminal","reason":"lock-out"}
+]

@@ -6,7 +6,7 @@ import {resolve,join} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {performance} from 'node:perf_hooks';
-import {createGame,clone,legalMoves,applyMove,publicMove,replayPath,pendingCount} from './engine.js';
+import {RULES,createGame,clone,legalMoves,applyMove,publicMove,replayPath,pendingCount} from './engine.js';
 import {playerConfig,decide,DecisionError} from './players.js';
 import {endpointFor,pricingFor} from './providers.js';
 import {connectionProfile,capabilityDefaultsForModel,endpointIdentity,endpointFingerprint} from './connections.js';
@@ -100,7 +100,7 @@ export class Match {
     let players=(options.players??[{},{}]).map((value,index)=>playerConfig({...value,...(options.capabilitySnapshots?.[index]?{capabilitySnapshot:options.capabilitySnapshots[index]}:{})}));
     if(players.length!==2) throw Error('Two player configurations required');
     const initial=options.initialState?clone(options.initialState):createGame(options);
-    if(initial.rules.version!==1||initial.status!=='playing') throw Error('Only active v1 positions can be resumed');
+    if(![1,RULES.version].includes(initial.rules.version)||initial.status!=='playing') throw Error('Only active v1/v2 positions can be resumed');
     const preflightCapabilities=options.preflightCapabilities!==false;
     if(preflightCapabilities) {
       for(const [index,player] of players.entries()) {
