@@ -16,3 +16,5 @@
 - When explicitly asked to play as the Antigravity CLI (agy) opponent, read `docs/agy-player.md` and follow the same dedicated-agent-interface and public-information restrictions above. Do not delegate move selection to other agents.
 
 - When explicitly asked to play as the OpenCode opponent, read `docs/opencode-player.md` and follow the same dedicated-agent-interface and public-information restrictions above. Do not delegate move selection to other agents.
+
+- When explicitly asked to play as the Claude Code opponent, read `docs/claude-player.md` and follow the same dedicated-agent-interface and public-information restrictions above. Do not delegate move selection to other agents. Respect Anthropic usage limits; do not attempt to bypass them.

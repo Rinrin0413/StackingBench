@@ -4,11 +4,31 @@ import {mkdtemp,rm,appendFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createGame,legalMoves,applyMove} from '../src/engine.js';
-import {DecisionError,playerConfig} from '../src/players.js';
+import {DecisionError,playerConfig,decide} from '../src/players.js';
 const dir=await mkdtemp(join(tmpdir(),'stackingbench-test-'));
 process.env.STACKINGBENCH_RUNS=dir;
 const {Match,readRun,hashState,listRuns}=await import('../src/match.js');
 after(async()=>{await rm(dir,{recursive:true,force:true});delete process.env.STACKINGBENCH_RUNS;});
+
+test('Claude Code stays on the manual session bridge without model requests or connection metadata',async t=>{
+  const fetch=t.mock.method(globalThis,'fetch',()=>{throw Error('Unexpected model request');});
+  const probeTransport=t.mock.fn(()=>{throw Error('Unexpected capability probe');});
+  const m=await Match.create({maxLocks:1,probeTransport,players:[{
+    type:'claude',connectionId:'unused-connection',modelId:'unused-api-model',
+    credential:'fixture-credential',sessionToken:'fixture-token'
+  },{type:'human'}]});
+  assert.deepEqual(m.config.connections,[null,null]);
+  const config=m.config.players[0];
+  for(const key of ['connectionId','modelId','credential','sessionToken'])assert(!Object.hasOwn(config,key));
+  await assert.rejects(()=>decide(m.state,config),/External player input required/);
+  await m.run();assert.equal(m.state.locks,0);
+  const root=await m.agentObserve();
+  await m.agentAction('preview',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,requestId:'local-only'});
+  await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id});
+  assert.equal(fetch.mock.callCount(),0);assert.equal(probeTransport.mock.callCount(),0);
+  const saved=JSON.stringify(await readRun(m.id));
+  for(const value of ['fixture-credential','fixture-token','unused-connection','unused-api-model'])assert(!saved.includes(value));
+});
 
 test('saved match replays each path to identical hashes and final summary',async()=>{
   const m=await Match.create({maxLocks:4,players:[{transitions:8},{transitions:8}]});await m.run();
@@ -132,7 +152,7 @@ test('LLM opponent uses its configured protocol then yields to human input',asyn
   assert.equal(m.records[1].metrics.calls,0);await m.stop();
 });
 
-for(const agentType of ['codex','agy','opencode']) {
+for(const agentType of ['codex','agy','opencode','claude']) {
 test(`${agentType} session waits, previews within a persistent budget, and logs reproducible moves`,async()=>{
   const m=await Match.create({maxLocks:2,players:[{type:agentType,transitions:1},{type:'human'}]});
   await m.run();assert.equal(m.records.length,0);assert.equal(m.agentStatus().ready,true);
@@ -236,7 +256,7 @@ test('Codex identity stays unknown without metadata and rejects invalid reasonin
   assert.deepEqual(m.records[0].execution,{model:null,reasoningEffort:null,provenance:{model:'unknown',reasoningEffort:'unknown'}});
 });
 
-for(const [agentType,defaultModel] of [['agy','Gemini'],['opencode','Model']]) {
+for(const [agentType,defaultModel] of [['agy','Gemini'],['opencode','Model'],['claude','Claude']]) {
 test(`${agentType} bridge records a single model identity and replays the selected path`,async()=>{
   assert.equal(playerConfig({type:agentType}).agentModel,defaultModel);
   assert.equal(playerConfig({type:agentType,agentModel:''}).agentModel,null);
@@ -245,7 +265,7 @@ test(`${agentType} bridge records a single model identity and replays the select
   assert.equal(m.config.connections[0],null);
   const root=await m.agentObserve(),move=root.observation.legalMoves[0];
   assert.equal(root.protocol,`stackingbench.${agentType}-session.v1`);
-  assert.match(root.prompt,new RegExp(agentType==='agy'?'Antigravity CLI':'OpenCode'));
+  assert.match(root.prompt,new RegExp({agy:'Antigravity CLI',opencode:'OpenCode',claude:'Claude Code'}[agentType]));
   assert.equal(root.configuredExecution.model,defaultModel);
   const serialized=JSON.stringify(root);
   for(const secret of ['"seed"','"rng"','"queue"'])assert(!serialized.includes(secret));
@@ -278,16 +298,17 @@ test(`${agentType} without previews rejects simulation and waits during the huma
 });
 }
 
-test('OpenCode model metadata validates input and preserves explicit unknown values',async()=>{
-  const config=playerConfig({type:'opencode'});
-  assert.equal(config.input,'opencode-session-v1');assert.equal(config.preview,true);assert.equal(config.transitions,32);
-  assert.equal(config.agentModel,'Model');assert.equal(config.reasoningEffort,null);
-  assert.equal(playerConfig({type:'opencode',agentModel:' Custom model '}).agentModel,'Custom model');
-  for(const agentModel of ['',null,'   '])assert.equal(playerConfig({type:'opencode',agentModel}).agentModel,null);
-  assert.equal(playerConfig({type:'opencode',agentModel:'x'.repeat(160)}).agentModel.length,160);
-  for(const agentModel of [123,'x'.repeat(161)])assert.throws(()=>playerConfig({type:'opencode',agentModel}),/agentModel/);
-  for(const observation of ['image','both'])assert.throws(()=>playerConfig({type:'opencode',observation}),/Only text/);
-  const m=await Match.create({maxLocks:3,players:[{type:'opencode',agentModel:'Configured',reasoningEffort:'high'},{type:'human'}]});
+for(const [agentType,defaultModel] of [['opencode','Model'],['claude','Claude']]) {
+test(`${agentType} model metadata validates input and preserves explicit unknown values`,async()=>{
+  const config=playerConfig({type:agentType});
+  assert.equal(config.input,`${agentType}-session-v1`);assert.equal(config.preview,true);assert.equal(config.transitions,32);
+  assert.equal(config.agentModel,defaultModel);assert.equal(config.reasoningEffort,null);
+  assert.equal(playerConfig({type:agentType,agentModel:' Custom model '}).agentModel,'Custom model');
+  for(const agentModel of ['',null,'   '])assert.equal(playerConfig({type:agentType,agentModel}).agentModel,null);
+  assert.equal(playerConfig({type:agentType,agentModel:'x'.repeat(160)}).agentModel.length,160);
+  for(const agentModel of [123,'x'.repeat(161)])assert.throws(()=>playerConfig({type:agentType,agentModel}),/agentModel/);
+  for(const observation of ['image','both'])assert.throws(()=>playerConfig({type:agentType,observation}),/Only text/);
+  const m=await Match.create({maxLocks:3,players:[{type:agentType,agentModel:'Configured',reasoningEffort:'high'},{type:'human'}]});
   for(const [input,model,provenance] of [[{},'Configured','user-configured'],[{agentModel:'Reported'},'Reported','agent-reported'],[{agentModel:null},null,'unknown']]) {
     const root=await m.agentObserve();
     await assert.rejects(()=>m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,agentModel:'x'.repeat(161)}),/agentModel/);
@@ -298,3 +319,4 @@ test('OpenCode model metadata validates input and preserves explicit unknown val
   assert.equal(saved[0].config.players[0].agentModel,'Configured');
   assert.deepEqual(saved.filter(r=>r.type==='decision').map(r=>r.execution),m.records.map(r=>r.execution));
 });
+}

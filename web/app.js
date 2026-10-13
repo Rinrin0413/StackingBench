@@ -2,9 +2,9 @@ import {createLibrary} from '/library.js';
 import {identityLabel} from '/replay-display.js';
 import {SHAPES,cells,spawn,motion,fits,spinType} from '/engine.js';
 const $=id=>document.getElementById(id),colors={I:'#72cfdb',J:'#7498ec',L:'#e6b570',O:'#ded479',S:'#85c39a',T:'#b699d5',Z:'#dd8e91',G:'#6c8580'};
-const isAgentPlayer=type=>['codex','agy','opencode'].includes(type);
-const agentName=type=>({codex:'Codex',agy:'Antigravity CLI (agy)',opencode:'OpenCode'})[type];
-const labels={opencode:'OpenCode',agy:'Antigravity CLI (agy)',codex:'Codex · このセッション',human:'人間（あなた）',search:'探索 bot',llm:'LLM · 試し読みなし','llm-preview':'LLM · 試し読みあり'};
+const isAgentPlayer=type=>['codex','agy','opencode','claude'].includes(type);
+const agentName=type=>({codex:'Codex',agy:'Antigravity CLI (agy)',opencode:'OpenCode',claude:'Claude Code'})[type];
+const labels={opencode:'OpenCode',claude:'Claude Code',agy:'Antigravity CLI (agy)',codex:'Codex · このセッション',human:'人間（あなた）',search:'探索 bot',llm:'LLM · 試し読みなし','llm-preview':'LLM · 試し読みあり'};
 let current=null,liveId=null,frame=0,follow=true,animation=0,noticeTimer,draft=null,submitting=false;
 let connectionProfiles=[];
 function connectionFor(config) {return connectionProfiles.find(connection=>connection.id===config?.connectionId);}
@@ -145,12 +145,12 @@ document.addEventListener('keydown',catchErrors(async e=>{
   if(e.repeat&&!['L','R','D'].includes(op))return;
   await humanInput(op);
 }));
-function player(key) {const type=$(`type-${key}`).value;return {type,...(['llm','llm-preview'].includes(type)?{connectionId:selectedConnection(key),modelId:selectedModel(key),model:selectedModel(key)}:{}),... (type==='codex'?{agentModel:$(`codex-model-${key}`).value,reasoningEffort:$(`codex-effort-${key}`).value}:{}),... (['agy','opencode'].includes(type)?{agentModel:$(`${type}-model-${key}`).value}:{}),preview:$('codex-preview').value==='true',observation:$('observation').value,transitions:Number($('transitions').value),maxTokens:Number($('tokens').value),
+function player(key) {const type=$(`type-${key}`).value;return {type,...(['llm','llm-preview'].includes(type)?{connectionId:selectedConnection(key),modelId:selectedModel(key),model:selectedModel(key)}:{}),... (type==='codex'?{agentModel:$(`codex-model-${key}`).value,reasoningEffort:$(`codex-effort-${key}`).value}:{}),... (['agy','opencode','claude'].includes(type)?{agentModel:$(`${type}-model-${key}`).value}:{}),preview:$('codex-preview').value==='true',observation:$('observation').value,transitions:Number($('transitions').value),maxTokens:Number($('tokens').value),
   timeoutMs:Number($('timeout').value)*1000,temperature:Number($('temperature').value),thinking:$('thinking').value,decisionTokens:Number($('decision-tokens').value),maxCalls:Number($('max-calls').value),requestIntervalMs:Number($('request-interval').value)*1000};}
 async function create(parent) {
   current=await api('/api/matches',{players:[player('a'),player('b')],seeds:[Number($('seed-a').value),Number($('seed-b').value)],first:Number($('first').value),maxLocks:Number($('max-locks').value),...(parent?{parent}:{})});
   liveId=current.id;frame=0;follow=true;animation++;draft=null;sessionStorage.setItem('stackingbench-live',liveId);
-  if(current.header.config.players.some(p=>['human','codex','agy','opencode'].includes(p.type)))current=await api(`/api/matches/${liveId}/run`,{});
+  if(current.header.config.players.some(p=>['human','codex','agy','opencode','claude'].includes(p.type)))current=await api(`/api/matches/${liveId}/run`,{});
   render();focusBoard();await refresh();
 }
 $('setup').addEventListener('submit',catchErrors(async e=>{e.preventDefault();await create();}));
@@ -192,7 +192,7 @@ async function loadConnectionModels(key) {
 for(const key of ['a','b']) {
   const update=()=>{
     const type=$(`type-${key}`).value,llm=['llm','llm-preview'].includes(type),profile=connectionFor({connectionId:selectedConnection(key)});
-    for(const agent of ['agy','opencode'])$(agent+'-identity-'+key).hidden=type!==agent;$('codex-identity-'+key).hidden=type!=='codex';
+    for(const agent of ['agy','opencode','claude'])$(agent+'-identity-'+key).hidden=type!==agent;$('codex-identity-'+key).hidden=type!=='codex';
     $(`connection-${key}`).parentElement.hidden=!llm;$(`model-${key}`).parentElement.hidden=!llm;$(`model-id-${key}`).disabled=!llm;$(`model-${key}`).disabled=!llm;
     const preview=Array.from($(`type-${key}`).options).find(o=>o.value==='llm-preview'),jev=profile?.protocol==='typesafe-jev-choice';
     preview.disabled=jev;if(jev&&type==='llm-preview')$(`type-${key}`).value='llm';

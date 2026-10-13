@@ -4,9 +4,9 @@ import {spawn} from 'node:child_process';
 import {mkdir} from 'node:fs/promises';
 const {chromium}=await import(process.env.PLAYWRIGHT_MODULE??'playwright');
 const agentType=process.env.AGENT_TYPE??'codex';
-const agentLabel={codex:'Codex',agy:'Antigravity',opencode:'OpenCode'}[agentType];
+const agentLabel={codex:'Codex',agy:'Antigravity',opencode:'OpenCode',claude:'Claude Code'}[agentType];
 assert(agentLabel,'Unsupported AGENT_TYPE');
-const waitBadge=`${agentType.toUpperCase()} WAIT`,defaultModel={codex:'GPT-6 Astra',agy:'Gemini',opencode:'Model'}[agentType];
+const waitBadge=`${agentType.toUpperCase()} WAIT`,defaultModel={codex:'GPT-6 Astra',agy:'Gemini',opencode:'Model',claude:'Claude'}[agentType];
 const url=process.env.APP_URL??'http://127.0.0.1:3211';
 const cli=(args,input)=>new Promise((resolve,reject)=>{
   const child=spawn(process.execPath,['scripts/agent.js',...args],{env:{...process.env,STACKINGBENCH_URL:url},stdio:['pipe','pipe','pipe']});
