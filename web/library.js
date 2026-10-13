@@ -1,4 +1,4 @@
-import {playerLabels,runTitle,formatDate,selectRuns,resultNames,efforts,identity} from './replay-display.js';
+import {playerLabels,runTitle,formatDate,selectRuns,resultNames,identity} from './replay-display.js';
 const $=id=>document.getElementById(id);
 const el=(tag,text,cls)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;};
 async function request(path,patch) {
@@ -51,19 +51,15 @@ export function createLibrary({openRun,changed}) {
     run.players.forEach((player,i)=>{
       if(['human','search'].includes(player.type))return;
       const group=el('fieldset'),legend=el('legend',`PLAYER ${i===0?'A':'B'} の表示情報`);group.append(legend);
-      for(const key of ['model','reasoningEffort']) {
-        const mode=el('select');mode.id=`override-${i}-${key}`;
-        for(const [value,label]of [['original','元の記録を使う'],['unknown','未記録にする'],['custom','訂正する']])mode.append(new Option(label,value));
-        mode.value=!Object.hasOwn(overrides[i],key)?'original':overrides[i][key]===null?'unknown':'custom';
-        const control=el(key==='model'?'input':'select');control.id=`value-${i}-${key}`;
-        if(key==='model'){control.maxLength=300;control.placeholder='モデル名';}
-        else for(const effort of efforts)control.append(new Option(effort,effort));
-        const original=identity(player,run.executions?.[i]?.[0])[key];control.value=overrides[i][key]??original??(key==='model'?'':'medium');
-        const update=()=>{control.hidden=mode.value!=='custom';control.required=mode.value==='custom';};update();mode.addEventListener('change',update);
-        group.append(field(key==='model'?'モデル名':'推論レベル',mode),field(key==='model'?'訂正後のモデル名':'訂正後の推論レベル',control));
-        control.parentElement.hidden=mode.value!=='custom';mode.addEventListener('change',()=>{control.parentElement.hidden=mode.value!=='custom';});
-        fields.push({i,key,mode,control});
-      }
+      const mode=el('select');mode.id=`override-${i}-model`;
+      for(const [value,label]of [['original','元の記録を使う'],['unknown','未記録にする'],['custom','訂正する']])mode.append(new Option(label,value));
+      mode.value=!Object.hasOwn(overrides[i],'model')?'original':overrides[i].model===null?'unknown':'custom';
+      const control=el('input');control.id=`value-${i}-model`;control.maxLength=300;control.placeholder='モデル名';
+      const original=identity(player,run.executions?.[i]?.[0]).model;control.value=overrides[i].model??original??'';
+      const update=()=>{control.hidden=mode.value!=='custom';control.required=mode.value==='custom';};update();mode.addEventListener('change',update);
+      group.append(field('モデル名',mode),field('訂正後のモデル名',control));
+      control.parentElement.hidden=mode.value!=='custom';mode.addEventListener('change',()=>{control.parentElement.hidden=mode.value!=='custom';});
+      fields.push({i,key:'model',mode,control});
       form.append(group);
     });
     const unsaved=el('p','変更はまだありません。');unsaved.setAttribute('role','status');

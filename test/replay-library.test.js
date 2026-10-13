@@ -11,10 +11,11 @@ import {identityLabel,playerLabels,selectRuns,formatDate,runTitle} from '../web/
 const players=[{type:'codex',agentModel:'Original',reasoningEffort:'high'},{type:'human'}];
 test('display overrides distinguish unknown from original and preserve mixed execution identities',()=>{
   const run={players,executions:[[{model:'First',reasoningEffort:'low'},{model:'Second',reasoningEffort:'high'}],[]],metadata:{players:[{model:'Corrected',reasoningEffort:null},{}]}};
-  assert.deepEqual(playerLabels(run),['Codex · Corrected / 推論レベル未記録（表示訂正）','人間']);
-  assert.match(playerLabels(run,true)[0],/First.*low.*Second.*high/);
-  assert.match(identityLabel(players[0],undefined,{model:null}),/モデル未記録 \/ high/);
-  assert.match(identityLabel({type:'llm',model:'API',thinking:'off'}),/推論レベル未記録/);
+  assert.deepEqual(playerLabels(run),['Codex · Corrected（表示訂正）','人間']);
+  assert.equal(playerLabels(run,true)[0],'Codex · First（申告情報） → Codex · Second（申告情報）');
+  assert.equal(identityLabel(players[0],undefined,{model:null}),'Codex · モデル未記録（表示訂正）');
+  assert.equal(identityLabel({type:'llm',model:'API',thinking:'off'}),'LLM · API');
+  assert.equal(identityLabel(players[0],undefined,{reasoningEffort:'low'}),'Codex · Original（申告情報）');
   assert.match(runTitle(run),/Corrected/);run.metadata.title='My replay';assert.equal(runTitle(run),'My replay');
 });
 test('library searches all runs and sorts, filters trash, results and favorites',()=>{
@@ -49,19 +50,27 @@ test('metadata HTTP lifecycle preserves logs, compatibility and public informati
   const id=created.value.id,url=`/api/runs/${id}/metadata`;
   const observe=(await request(`/api/agent/matches/${id}`)).value;
   assert.equal((await request(url,'PATCH',{trashed:true})).status,409);
-  const patch={title:'訂正した対局',favorite:true,players:[{model:'Corrected',reasoningEffort:'ultra'},{}]};
+  const patch={title:'訂正した対局',favorite:true,players:[{model:'Corrected Ultra'},{}]};
   assert.equal((await request(url,'PATCH',patch)).status,200);
   assert.deepEqual((await request(`/api/agent/matches/${id}`)).value,observe);
-  assert(!JSON.stringify((await request(`/api/agent/matches/${id}/status`)).value).includes('Corrected'));
+  assert(!JSON.stringify((await request(`/api/agent/matches/${id}/status`)).value).includes('Corrected Ultra'));
   const before=await readFile(join(root,`${id}.jsonl`),'utf8');
-  for(const invalid of [{players:[{model:3},{}]},{players:[{}, {model:'human-model'}]},{title:'x'.repeat(161)},{players:[{model:'x'.repeat(301)},{}]},{players:[{reasoningEffort:'unlimited'},{}]},{favorite:'true'},{seed:5},{players:[]},{players:[null,{}]}])assert.equal((await request(url,'PATCH',invalid)).status,400);
+  for(const invalid of [{players:[{model:3},{}]},{players:[{}, {model:'human-model'}]},{title:'x'.repeat(161)},{players:[{model:'x'.repeat(301)},{}]},{players:[{reasoningEffort:'high'},{}]},{favorite:'true'},{seed:5},{players:[]},{players:[null,{}]}])assert.equal((await request(url,'PATCH',invalid)).status,400);
   assert.equal((await request(url,'PATCH',{title:'bad'},{Origin:'https://example.com'})).status,403);
   assert.equal((await request(url,'PATCH',patch,{'Content-Type':'text/plain'})).status,415);
   assert.equal(await readFile(join(root,`${id}.jsonl`),'utf8'),before);
   await request(`/api/matches/${id}/stop`,'POST',{});
   const original=await readFile(join(root,`${id}.jsonl`),'utf8');
-  await request(url,'PATCH',{players:[{model:null,reasoningEffort:null},{}]});
-  assert.deepEqual((await request(url)).value.players[0],{model:null,reasoningEffort:null});
+  const legacyMetadata={title:'Legacy',favorite:true,trashed:false,players:[{model:'Legacy model',reasoningEffort:'high'},{}]};
+  const metadataFile=join(root,'metadata',`${id}.json`),legacySource=JSON.stringify(legacyMetadata)+'\n';
+  await writeFile(metadataFile,legacySource);
+  assert.deepEqual((await request(url)).value,{...legacyMetadata,players:[{model:'Legacy model'},{}]});
+  assert.equal(await readFile(metadataFile,'utf8'),legacySource);
+  assert.equal((await request('/api/runs?library=1')).value.errors.length,0);
+  await request(url,'PATCH',{favorite:false});
+  assert(!JSON.stringify(JSON.parse(await readFile(metadataFile,'utf8'))).includes('reasoningEffort'));
+  await request(url,'PATCH',{players:[{model:null},{}]});
+  assert.deepEqual((await request(url)).value.players[0],{model:null});
   await request(url,'PATCH',{players:[{},{}]});assert.deepEqual((await request(url)).value.players,[{},{}]);
   await Promise.all([request(url,'PATCH',{favorite:false}),request(url,'PATCH',{title:'Concurrent'})]);
   assert.equal((await request(url)).value.title,'Concurrent');assert.equal((await request(url)).value.favorite,false);
@@ -87,10 +96,10 @@ test('metadata HTTP lifecycle preserves logs, compatibility and public informati
   assert.equal((await request('/api/runs/missing/metadata','PATCH',{title:'missing'})).status,404);
   assert.equal((await request('/api/runs?trash=invalid')).status,400);
   for(const type of ['codex','agy','opencode','claude']) {
-    const configured=await request('/api/matches','POST',{players:[{type,agentModel:'Custom session model',reasoningEffort:'high'},{type:'human'}],maxLocks:1});
+    const configured=await request('/api/matches','POST',{players:[{type,agentModel:'Custom session model High',reasoningEffort:'high'},{type:'human'}],maxLocks:1});
     assert.equal(configured.status,201);
-    assert.equal(configured.value.header.config.players[0].agentModel,'Custom session model');
-    assert.equal(configured.value.header.config.players[0].reasoningEffort,type==='codex'?'high':null);
+    assert.equal(configured.value.header.config.players[0].agentModel,'Custom session model High');
+    assert(!Object.hasOwn(configured.value.header.config.players[0],'reasoningEffort'));
     await request(`/api/matches/${configured.value.id}/stop`,'POST',{});
   }
 });

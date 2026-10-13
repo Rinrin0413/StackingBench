@@ -35,7 +35,7 @@ export class AgentTurn {
     this.previews.set(input.requestId,{request,response});return clone(response);
   }
   decision(input) {
-    this.check(input,['decisionId','moveId','memo','reason','agentModel','reasoningEffort']);
+    this.check(input,['decisionId','moveId','memo','reason','agentModel']);
     const move=this.moves.find(m=>m.id===input.moveId);
     if(!move)throw Error('Unknown root moveId');
     for(const [key,max] of [['memo',240],['reason',400]])

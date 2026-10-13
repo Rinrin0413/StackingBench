@@ -45,12 +45,12 @@ try {
   await click('#library-more');assert.equal(await evaluate("document.querySelectorAll('.run-card').length"),100);
   await fill('#library-search','fixture-0');await wait("document.querySelectorAll('.run-card').length===1");await click('.run-card');assert.match(await evaluate("document.querySelector('#library-detail').textContent"),/2026\/01\/02.*08:30/);
   await button('情報を編集');await fill('#replay-title','Edited title');
-  await fill('#override-0-model','custom');await fill('#value-0-model','Corrected model');await fill('#override-0-reasoningEffort','unknown');
+  await fill('#override-0-model','custom');await fill('#value-0-model','Corrected model');
   await button('保存する');await wait("document.querySelector('#library-status').textContent==='保存しました'");
-  assert.match(await evaluate("document.querySelector('.run-card').textContent"),/Corrected model.*推論レベル未記録/);
+  assert.match(await evaluate("document.querySelector('.run-card').textContent"),/Corrected model/);
   await writeFile('runs/ui-library-desktop.png',Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));
   await button('リプレイを開く');await wait("!document.querySelector('#replay-library').open");
-  assert.match(await evaluate("document.querySelector('#recorded-model-a').textContent"),/Corrected model.*推論レベル未記録/);
+  assert.match(await evaluate("document.querySelector('#recorded-model-a').textContent"),/Corrected model/);
   assert.equal(await evaluate("document.querySelector('#match-label').textContent"),'Edited title');
   assert.equal(await evaluate('document.activeElement.id'),'show-library');
   await click('#show-library');await wait("document.querySelector('#library-status').textContent===''");
@@ -64,8 +64,8 @@ try {
   await button('ゴミ箱へ移動');await wait("document.querySelectorAll('.run-card').length===0");
   await click('#library-trash');await click('.run-card');await button('復元する');await wait("document.querySelectorAll('.run-card').length===0");
   await click('#library-active');await click('.run-card');
-  await button('情報を編集');await fill('#override-0-model','original');await fill('#override-0-reasoningEffort','original');await button('保存する');await wait("document.querySelector('#library-status').textContent==='保存しました'");
-  assert.match(await evaluate("document.querySelector('.run-card').textContent"),/Original model.*high/);
+  await button('情報を編集');await fill('#override-0-model','original');await button('保存する');await wait("document.querySelector('#library-status').textContent==='保存しました'");
+  assert.match(await evaluate("document.querySelector('.run-card').textContent"),/Original model/);
   await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   assert(await evaluate("document.querySelector('#replay-library').scrollWidth<=document.querySelector('#replay-library').clientWidth"),'Mobile dialog overflow');
   await writeFile('runs/ui-library-mobile.png',Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));

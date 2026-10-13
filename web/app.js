@@ -145,7 +145,7 @@ document.addEventListener('keydown',catchErrors(async e=>{
   if(e.repeat&&!['L','R','D'].includes(op))return;
   await humanInput(op);
 }));
-function player(key) {const type=$(`type-${key}`).value;return {type,...(['llm','llm-preview'].includes(type)?{connectionId:selectedConnection(key),modelId:selectedModel(key),model:selectedModel(key)}:{}),... (type==='codex'?{agentModel:$(`codex-model-${key}`).value,reasoningEffort:$(`codex-effort-${key}`).value}:{}),... (['agy','opencode','claude'].includes(type)?{agentModel:$(`${type}-model-${key}`).value}:{}),preview:$('codex-preview').value==='true',observation:$('observation').value,transitions:Number($('transitions').value),maxTokens:Number($('tokens').value),
+function player(key) {const type=$(`type-${key}`).value;return {type,...(['llm','llm-preview'].includes(type)?{connectionId:selectedConnection(key),modelId:selectedModel(key),model:selectedModel(key)}:{}),... (type==='codex'?{agentModel:$(`codex-model-${key}`).value}:{}),... (['agy','opencode','claude'].includes(type)?{agentModel:$(`${type}-model-${key}`).value}:{}),preview:$('codex-preview').value==='true',observation:$('observation').value,transitions:Number($('transitions').value),maxTokens:Number($('tokens').value),
   timeoutMs:Number($('timeout').value)*1000,temperature:Number($('temperature').value),thinking:$('thinking').value,decisionTokens:Number($('decision-tokens').value),maxCalls:Number($('max-calls').value),requestIntervalMs:Number($('request-interval').value)*1000};}
 async function create(parent) {
   current=await api('/api/matches',{players:[player('a'),player('b')],seeds:[Number($('seed-a').value),Number($('seed-b').value)],first:Number($('first').value),maxLocks:Number($('max-locks').value),...(parent?{parent}:{})});

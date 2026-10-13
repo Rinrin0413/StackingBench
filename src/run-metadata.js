@@ -6,7 +6,7 @@ const efforts=['none','minimal','low','medium','high','xhigh','max','ultra'];
 const empty=()=>({title:null,favorite:false,trashed:false,players:[{},{}]});
 const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 function path(id){if(!/^[a-zA-Z0-9_-]+$/.test(id))throw Error('Invalid run ID');return join(root,'metadata',`${id}.json`);}
-function validate(input,players) {
+function validate(input,players,legacy=false) {
   if(!object(input)||Object.keys(input).some(k=>!['title','favorite','trashed','players'].includes(k)))throw Error('Invalid metadata fields');
   const result={...input};
   if(Object.hasOwn(input,'title')) {
@@ -17,7 +17,7 @@ function validate(input,players) {
   if(Object.hasOwn(input,'players')) {
     if(!Array.isArray(input.players)||input.players.length!==2)throw Error('Two player overrides required');
     result.players=input.players.map((p,i)=>{
-      if(!object(p)||Object.keys(p).some(k=>!['model','reasoningEffort'].includes(k)))throw Error('Invalid player override');
+      if(!object(p)||Object.keys(p).some(k=>k!=='model'&&!(legacy&&k==='reasoningEffort')))throw Error('Invalid player override');
       if(players&&['human','search'].includes(players[i]?.type)&&Object.keys(p).length)throw Error('This player does not use a model');
       const value={...p};
       if(Object.hasOwn(p,'model')) {
@@ -25,6 +25,8 @@ function validate(input,players) {
         value.model=p.model?.trim()||null;
       }
       if(Object.hasOwn(p,'reasoningEffort')&&p.reasoningEffort!==null&&!efforts.includes(p.reasoningEffort))throw Error('Invalid reasoning effort');
+      // Read old overrides without exposing the retired field; leave the source file intact.
+      delete value.reasoningEffort;
       return value;
     });
   }
@@ -32,7 +34,7 @@ function validate(input,players) {
 }
 export async function readMetadata(id) {
   const file=path(id);
-  try {return {...empty(),...validate(JSON.parse(await readFile(file,'utf8')))};}
+  try {return {...empty(),...validate(JSON.parse(await readFile(file,'utf8')),undefined,true)};}
   catch(e){if(e.code==='ENOENT')return empty();throw e;}
 }
 const pending=new Map();

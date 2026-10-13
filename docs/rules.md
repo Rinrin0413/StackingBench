@@ -70,4 +70,4 @@ LLM は JSON で `choose` または `preview` を要求するアプリケーシ�
 
 `codex` は外部セッションからの入力待ちとなる追加プレイヤー種別で、ゲームルールv1と既存リプレイ互換性は変えない。試し読みの可否は `preview`、予算は `transitions` に保存する。観測・試し読みの公開境界はLLMと同一。最新ルートの合法手IDと局面ごとのdecisionIdを検証し、エンジンの保存経路で実行する。通常LLMとはコンテキスト・生成予算・エラー処理が異なる別条件であり、トークン数と費用は不明。詳細は [Codex セッションの手順と記録仕様](codex-player.md)。
 
-Antigravity (`agy`)、OpenCode (`opencode`)、Claude Code (`claude`) も同じ外部セッション接続を使用する。モデル名は記録用の自由記述で、既定値はそれぞれ `Gemini` / `Model` / `Claude`。推論レベルは記録しない。ゲームルールv1・既存リプレイ互換性は維持する。詳細は [Antigravity の手順](agy-player.md) 、[OpenCode の手順](opencode-player.md)、[Claude Code の手順](claude-player.md)。
+Antigravity (`agy`)、OpenCode (`opencode`)、Claude Code (`claude`) も同じ外部セッション接続を使用する。モデル名は記録用の自由記述で、既定値はそれぞれ `Gemini` / `Model` / `Claude`。推論レベルも記録する場合は、Codex を含めモデル名に含める。ゲームルールv1・既存リプレイ互換性は維持する。詳細は [Antigravity の手順](agy-player.md) 、[OpenCode の手順](opencode-player.md)、[Claude Code の手順](claude-player.md)。

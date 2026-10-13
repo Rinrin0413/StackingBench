@@ -76,7 +76,7 @@ LLM プレイヤー（`llm` / `llm-preview`）は、ローカル推論サーバ�
 
 チャットやコーディングエージェントの会話セッション自体を対戦相手にできます。専用コマンド `scripts/agent.js` を介して公開観測を取得し、手を送信します。ブラウザからセッションを自動起動する機能はありません。
 
-- **Codex セッション**: 相手を「Codex · このセッション」にし、画面に表示される対局ID付きの依頼を Codex の会話に伝えます。試し読み切替可能（既定32遷移）、モデル名・推論レベルも記録されます。詳細は [docs/codex-player.md](docs/codex-player.md) を参照してください。
+- **Codex セッション**: 相手を「Codex · このセッション」にし、画面に表示される対局ID付きの依頼を Codex の会話に伝えます。試し読み切替可能（既定32遷移）、モデル名も記録されます。推論レベルは必要に応じてモデル名に含めます。詳細は [docs/codex-player.md](docs/codex-player.md) を参照してください。
 - **Antigravity CLI (agy)**: 相手を「Antigravity CLI (agy)」にし、対局作成後に「対戦依頼をコピー」して agy の会話に貼り付けます。記録用モデル名を設定可能。詳細は [docs/agy-player.md](docs/agy-player.md) を参照してください。
 - **OpenCode**: 相手を「OpenCode」にし、対局作成後に「対戦依頼をコピー」して opencode の会話に貼り付けます。記録用モデル名は自由記述、既定値は `Model`。詳細は [docs/opencode-player.md](docs/opencode-player.md) を参照してください。
 - **Claude Code**: 相手を「Claude Code」にし、「対戦依頼をコピー」して、ユーザー自身が起動した Claude Code の会話に手動で貼り付けます。記録用モデル名の既定値は `Claude`。StackingBench は Claude の認証情報・セッショントークン・API リクエストを扱わず、Anthropic 側の利用制限の回避手段も提供しません。詳細は [docs/claude-player.md](docs/claude-player.md) を参照してください。
@@ -90,7 +90,7 @@ LLM プレイヤー（`llm` / `llm-preview`）は、ローカル推論サーバ�
 - **リプレイと局面分岐比較**:
   - すべての対局を JSONL で保存し、スライダーによる巻き戻し再生や移動・回転経路の確認が可能。
   - 「保存した対局」のライブラリから、タイトル・モデル名・対局 ID で全件検索できます。結果・お気に入りによる絞り込み、日時・タイトル順の並べ替え、50件ずつの表示に対応します。日時はブラウザの言語とタイムゾーンで表示します。
-  - 詳細の「情報を編集」で任意タイトルと A/B のモデル名・推論レベルを訂正できます。「未記録にする」と「元の記録を使う」は別操作です。元のモデル記録は詳細から確認できます。
+  - 詳細の「情報を編集」で任意タイトルと A/B のモデル名を訂正できます。「未記録にする」と「元の記録を使う」は別操作です。元のモデル記録は詳細から確認できます。
   - 不要な対局はゴミ箱へ移動し、個別に復元できます。完全削除・自動消去はありません。実行中・入力待ちの対局は停止後に移動してください。
   - リプレイ閲覧中に左のプレイヤー設定を変更し、「この局面で比較」を押すことで同一局面から別モデルや別条件で分岐実行できます（メモはリセット）。
 - **対局メトリクスと可視化**:
@@ -138,7 +138,7 @@ pnpm run check
 
 ライブラリの管理情報は `runs/metadata/<対局ID>.json` に別保存します。タイトル・モデル表示の訂正・お気に入り・ゴミ箱状態は、元の JSONL、対局設定、再現検証、エージェントへの観測を変更しません。バックアップ時は JSONL と `metadata/` を一緒にコピーしてください。既存ログは管理情報なしでもそのまま利用できます。
 
-管理 API は `GET/PATCH /api/runs/:id/metadata`。PATCH は `title`、`favorite`、`trashed`、`players` を受け付けます。`players` は A/B の2要素で、各要素の `model` / `reasoningEffort` は省略で元の記録、`null` で未記録、文字列で訂正を表します。`GET /api/runs?library=1&trash=all` は `{runs, errors}` を返し、破損ファイルがあっても他の対局を一覧できます。`trash` は `active`（既定）・`trash`・`all`。従来のリプレイ取得 API と既定の一覧配列形式は維持します。
+管理 API は `GET/PATCH /api/runs/:id/metadata`。PATCH は `title`、`favorite`、`trashed`、`players` を受け付けます。`players` は A/B の2要素で、各要素の `model` は省略で元の記録、`null` で未記録、文字列で訂正を表します。`GET /api/runs?library=1&trash=all` は `{runs, errors}` を返し、破損ファイルがあっても他の対局を一覧できます。`trash` は `active`（既定）・`trash`・`all`。従来のリプレイ取得 API と既定の一覧配列形式は維持します。
 
 ライブラリのブラウザ回帰確認は `CHROME_PATH=/usr/bin/google-chrome node scripts/library-smoke.js` で実行できます。専用の一時データとサーバーを使用し、スクリーンショットを `runs/` に保存します。
 

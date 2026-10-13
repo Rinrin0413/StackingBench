@@ -229,31 +229,30 @@ test('Codex operations serialize and stopping during observation is honored',asy
 });
 
 
-test('Codex model and reasoning metadata persist in headers, decisions, snapshots and run listing',async()=>{
-  const config={type:'codex',preview:false,agentModel:'GPT-6 Astra',reasoningEffort:'High'};
+test('Codex model names including reasoning levels persist without a separate metadata field',async()=>{
+  const config={type:'codex',preview:false,agentModel:'GPT-6 Astra High'};
   const m=await Match.create({maxLocks:2,players:[config,{type:'human'}]});
-  assert.equal(m.header.config.players[0].agentModel,'GPT-6 Astra');assert.equal(m.header.config.players[0].reasoningEffort,'high');
-  let root=await m.agentObserve();assert.equal(root.configuredExecution.model,'GPT-6 Astra');
+  assert.equal(m.header.config.players[0].agentModel,'GPT-6 Astra High');assert(!Object.hasOwn(m.header.config.players[0],'reasoningEffort'));
+  let root=await m.agentObserve();assert.equal(root.configuredExecution.model,'GPT-6 Astra High');
   await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id});
-  assert.deepEqual(m.records[0].execution,{model:'GPT-6 Astra',reasoningEffort:'high',provenance:{model:'user-configured',reasoningEffort:'user-configured'}});
+  assert.deepEqual(m.records[0].execution,{model:'GPT-6 Astra High',provenance:{model:'user-configured'}});
   root=await m.agentObserve();
-  await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,agentModel:'test-model',reasoningEffort:'medium'});
+  await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,agentModel:'test-model Medium'});
   const saved=await readRun(m.id),decisions=saved.filter(r=>r.type==='decision');
-  assert.equal(decisions[1].execution.model,'test-model');assert.equal(decisions[1].execution.reasoningEffort,'medium');
-  assert.equal(decisions[1].execution.provenance.reasoningEffort,'agent-reported');
-  assert.equal(saved[0].config.players[0].agentModel,'GPT-6 Astra');
+  assert.equal(decisions[1].execution.model,'test-model Medium');assert(!Object.hasOwn(decisions[1].execution,'reasoningEffort'));
+  assert.deepEqual(decisions[1].execution.provenance,{model:'agent-reported'});
+  assert.equal(saved[0].config.players[0].agentModel,'GPT-6 Astra High');
   assert.deepEqual(m.snapshot().records.map(r=>r.execution),decisions.map(r=>r.execution));
   const listed=(await listRuns()).find(r=>r.id===m.id);assert.deepEqual(listed.executions[0],decisions.map(r=>r.execution));
 });
-test('Codex identity stays unknown without metadata and rejects invalid reasoning levels',async()=>{
+test('Codex identity stays unknown without metadata and rejects the retired reasoning field',async()=>{
   assert.equal(playerConfig({type:'codex',model:'unrelated-api-model'}).agentModel,null);
-  assert.equal(playerConfig({type:'codex'}).reasoningEffort,null);
-  assert.throws(()=>playerConfig({type:'codex',reasoningEffort:'invented'}),/reasoningEffort/);
+  assert(!Object.hasOwn(playerConfig({type:'codex'}),'reasoningEffort'));
   const m=await Match.create({maxLocks:1,players:[{type:'codex'},{type:'human'}]});const root=await m.agentObserve();
-  await assert.rejects(()=>m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,reasoningEffort:123}),/reasoningEffort/);
+  await assert.rejects(()=>m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,reasoningEffort:'high'}),/Unexpected input property/);
   assert.equal(m.state.locks,0);
-  await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,agentModel:null,reasoningEffort:null});
-  assert.deepEqual(m.records[0].execution,{model:null,reasoningEffort:null,provenance:{model:'unknown',reasoningEffort:'unknown'}});
+  await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,agentModel:null});
+  assert.deepEqual(m.records[0].execution,{model:null,provenance:{model:'unknown'}});
 });
 
 for(const [agentType,defaultModel] of [['agy','Gemini'],['opencode','Model'],['claude','Claude']]) {
@@ -274,7 +273,7 @@ test(`${agentType} bridge records a single model identity and replays the select
   assert.deepEqual(await m.agentAction('preview',input),preview);
   await m.agentAction('choose',{decisionId:root.decisionId,moveId:move.id});
   assert.equal(m.records[0].execution.model,defaultModel);
-  assert.equal(m.records[0].execution.reasoningEffort,null);
+  assert(!Object.hasOwn(m.records[0].execution,'reasoningEffort'));
   assert.equal(m.records[0].trace.source,`${agentType}-session`);
   assert.equal(m.records[0].metrics.calls,0);
   assert.deepEqual(applyMove(m.header.initialState,m.records[0].move).state,m.state);
@@ -302,18 +301,18 @@ for(const [agentType,defaultModel] of [['opencode','Model'],['claude','Claude']]
 test(`${agentType} model metadata validates input and preserves explicit unknown values`,async()=>{
   const config=playerConfig({type:agentType});
   assert.equal(config.input,`${agentType}-session-v1`);assert.equal(config.preview,true);assert.equal(config.transitions,32);
-  assert.equal(config.agentModel,defaultModel);assert.equal(config.reasoningEffort,null);
+  assert.equal(config.agentModel,defaultModel);assert(!Object.hasOwn(config,'reasoningEffort'));
   assert.equal(playerConfig({type:agentType,agentModel:' Custom model '}).agentModel,'Custom model');
   for(const agentModel of ['',null,'   '])assert.equal(playerConfig({type:agentType,agentModel}).agentModel,null);
   assert.equal(playerConfig({type:agentType,agentModel:'x'.repeat(160)}).agentModel.length,160);
   for(const agentModel of [123,'x'.repeat(161)])assert.throws(()=>playerConfig({type:agentType,agentModel}),/agentModel/);
   for(const observation of ['image','both'])assert.throws(()=>playerConfig({type:agentType,observation}),/Only text/);
-  const m=await Match.create({maxLocks:3,players:[{type:agentType,agentModel:'Configured',reasoningEffort:'high'},{type:'human'}]});
+  const m=await Match.create({maxLocks:3,players:[{type:agentType,agentModel:'Configured'},{type:'human'}]});
   for(const [input,model,provenance] of [[{},'Configured','user-configured'],[{agentModel:'Reported'},'Reported','agent-reported'],[{agentModel:null},null,'unknown']]) {
     const root=await m.agentObserve();
     await assert.rejects(()=>m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,agentModel:'x'.repeat(161)}),/agentModel/);
-    await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,reasoningEffort:'high',...input});
-    assert.deepEqual(m.records.at(-1).execution,{model,reasoningEffort:null,provenance:{model:provenance,reasoningEffort:'unknown'}});
+    await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,...input});
+    assert.deepEqual(m.records.at(-1).execution,{model,provenance:{model:provenance}});
   }
   const saved=await readRun(m.id);
   assert.equal(saved[0].config.players[0].agentModel,'Configured');
