@@ -1,4 +1,4 @@
-import {isAgentPlayer,agentModel,agentDefaultModels} from './agent-identity.js';
+import {isAgentPlayer,agentModel,agentDefaultModels,rejectReasoningEffort} from './agent-identity.js';
 import {performance} from 'node:perf_hooks';
 import {setTimeout as delay} from 'node:timers/promises';
 import {legalMoves,pendingCount} from './engine.js';
@@ -13,6 +13,7 @@ export const QUICK_MODEL='Gemma-4-E2B_UD_Q4_K_XL_fast';
 export const DEFAULT_PLAYER={type:'search',observation:'text',model:DEFAULT_MODEL,transitions:32,temperature:0.2,maxTokens:2048,
   timeoutMs:120000,decisionTokens:8192,maxCalls:34,requestIntervalMs:0,responseFormat:'schema',responseParsing:'strict',thinking:'server-default'};
 export function playerConfig(value={}) {
+  rejectReasoningEffort(value);
   if(value.type==='human') {
     if(value.observation!==undefined&&value.observation!=='text') throw Error('Only text observation encoding is supported');
     return {type:'human',observation:'text',input:'srs-controls-v1'};
@@ -21,7 +22,7 @@ export function playerConfig(value={}) {
     const preview=value.preview??true,transitions=value.transitions??32;
     if(value.observation!==undefined&&value.observation!=='text')throw Error('Only text observations are implemented');
     if(typeof preview!=='boolean'||!Number.isInteger(transitions)||transitions<1||transitions>2048)throw Error('Invalid agent preview settings');
-    return {type:value.type,observation:'text',input:`${value.type}-session-v1`,preview,transitions,model:null,agentModel:agentModel(value.agentModel===undefined?agentDefaultModels[value.type]:value.agentModel),metadataSource:'user-configured'};
+    return {type:value.type,observation:'text',input:`${value.type}-session-v2`,preview,transitions,model:null,agentModel:agentModel(value.agentModel===undefined?agentDefaultModels[value.type]:value.agentModel),metadataSource:'user-configured'};
   }
   const modelId=value.modelId??value.model??DEFAULT_MODEL;
   const inferredProvider=value.provider??(value.connectionId?connectionProfile(value.connectionId).legacyProvider:providerFor(modelId));

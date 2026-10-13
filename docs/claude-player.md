@@ -49,7 +49,7 @@ echo '{"decisionId":"現在のdecisionId","moveId":"m0012","reason":"短い選�
 
 ## 記録
 
-プレイヤー種別は `claude`、入力方式は `claude-session-v1` として保存します。モデル名は開始時の `config.players[].agentModel` と各判断の `execution.model` に保存し、リプレイ・保存対局一覧に表示します。設定値と判断時の自己申告は provenance で区別し、自動検証済みとは扱いません。
+プレイヤー種別は `claude`、入力方式は `claude-session-v2` として保存します。v2 は旧項目 `reasoningEffort` を対局作成・手の確定ともに拒否し、モデル名への記載を案内します。モデル名は開始時の `config.players[].agentModel` と各判断の `execution.model` に保存し、リプレイ・保存対局一覧に表示します。設定値と判断時の自己申告は provenance で区別し、自動検証済みとは扱いません。
 
 観測・試し読み・選択・拒否を保存し、選択したSRS経路で再生できます。実トークン数・料金・内部推論は取得できません。API呼び出し数は0、トークン数と料金は不明として記録します。判断時間にはセッションの待機等も含まれます。エラー時のbotへの置換はありません。既存の会話やツール環境を含むため、API接続のモデル性能測定とは別条件です。
 

@@ -158,6 +158,13 @@ test(`${agentType} session waits, previews within a persistent budget, and logs 
   await m.run();assert.equal(m.records.length,0);assert.equal(m.agentStatus().ready,true);
   await assert.rejects(()=>m.step(),/agent endpoint/);
   const before=hashState(m.state),root=await m.agentObserve();
+  assert.equal(m.header.config.players[0].input,`${agentType}-session-v2`);
+  assert.equal(root.protocol,`stackingbench.${agentType}-session.v2`);
+  for(const reasoningEffort of ['high',null,123]) {
+    assert.throws(()=>playerConfig({type:agentType,reasoningEffort}),/reasoningEffort.*agentModel.*に含めてください/);
+    await assert.rejects(()=>m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,reasoningEffort}),/reasoningEffort.*agentModel.*に含めてください/);
+  }
+  assert.equal(hashState(m.state),before);assert.equal(m.records.length,0);
   assert(root.prompt.includes('moveId'));assert(!root.prompt.includes('\"action\":\"choose\"'));
   assert.equal(root.preview.enabled,true);assert.equal(m.config.players[0].model,null);assert.equal(m.config.connections[0],null);
   const move=root.observation.legalMoves.find(m=>m.hold),preview={decisionId:root.decisionId,moveId:move.id,requestId:'one'};
@@ -249,7 +256,7 @@ test('Codex identity stays unknown without metadata and rejects the retired reas
   assert.equal(playerConfig({type:'codex',model:'unrelated-api-model'}).agentModel,null);
   assert(!Object.hasOwn(playerConfig({type:'codex'}),'reasoningEffort'));
   const m=await Match.create({maxLocks:1,players:[{type:'codex'},{type:'human'}]});const root=await m.agentObserve();
-  await assert.rejects(()=>m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,reasoningEffort:'high'}),/Unexpected input property/);
+  await assert.rejects(()=>m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,reasoningEffort:'high'}),/reasoningEffort.*agentModel.*に含めてください/);
   assert.equal(m.state.locks,0);
   await m.agentAction('choose',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,agentModel:null});
   assert.deepEqual(m.records[0].execution,{model:null,provenance:{model:'unknown'}});
@@ -263,7 +270,7 @@ test(`${agentType} bridge records a single model identity and replays the select
   await m.run();assert(m.isAgentTurn());assert(m.snapshot().hasAgent);
   assert.equal(m.config.connections[0],null);
   const root=await m.agentObserve(),move=root.observation.legalMoves[0];
-  assert.equal(root.protocol,`stackingbench.${agentType}-session.v1`);
+  assert.equal(root.protocol,`stackingbench.${agentType}-session.v2`);
   assert.match(root.prompt,new RegExp({agy:'Antigravity CLI',opencode:'OpenCode',claude:'Claude Code'}[agentType]));
   assert.equal(root.configuredExecution.model,defaultModel);
   const serialized=JSON.stringify(root);
@@ -300,7 +307,7 @@ test(`${agentType} without previews rejects simulation and waits during the huma
 for(const [agentType,defaultModel] of [['opencode','Model'],['claude','Claude']]) {
 test(`${agentType} model metadata validates input and preserves explicit unknown values`,async()=>{
   const config=playerConfig({type:agentType});
-  assert.equal(config.input,`${agentType}-session-v1`);assert.equal(config.preview,true);assert.equal(config.transitions,32);
+  assert.equal(config.input,`${agentType}-session-v2`);assert.equal(config.preview,true);assert.equal(config.transitions,32);
   assert.equal(config.agentModel,defaultModel);assert(!Object.hasOwn(config,'reasoningEffort'));
   assert.equal(playerConfig({type:agentType,agentModel:' Custom model '}).agentModel,'Custom model');
   for(const agentModel of ['',null,'   '])assert.equal(playerConfig({type:agentType,agentModel}).agentModel,null);

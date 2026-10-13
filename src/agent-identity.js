@@ -1,6 +1,9 @@
 export const isAgentPlayer=type=>['codex','agy','opencode','claude'].includes(type);
 export const agentNames={codex:'Codex',agy:'Antigravity CLI (agy)',opencode:'OpenCode',claude:'Claude Code'};
 export const agentDefaultModels={agy:'Gemini',opencode:'Model',claude:'Claude'};
+export function rejectReasoningEffort(input) {
+  if(Object.hasOwn(input,'reasoningEffort'))throw Error('reasoningEffort は廃止されました。推論レベルはモデル名（agentModel）に含めてください。');
+}
 // Session metadata is supplied by the user or agent, never inferred from an API model selector.
 export function agentModel(value) {
   if(value===undefined||value===null||value==='')return null;

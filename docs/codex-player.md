@@ -50,6 +50,8 @@ echo '{"decisionId":"観測のdecisionId","moveId":"m0012","reason":"短い選�
 
 `reason` は最大400文字、`memo` は240文字、`agentModel` は160文字です。モデル名が分かる場合は `agentModel` に実際の値を指定します。推論レベルは独立した項目として扱わず、必要ならモデル名に含めます。不明なら推測せず省略します。省略したモデル名は対局開始時の記録用設定を使い、明示的なnullは未記録として扱います。途中でモデルや推論レベルを変更した場合は、その後の各判断でモデル名を更新してください。
 
+`protocol` は `stackingbench.codex-session.v2`、入力方式は `codex-session-v2` です。v2 は旧項目 `reasoningEffort` を対局作成・手の確定ともに拒否し、モデル名への記載を案内します。保存済みの v1 対局は引き続きリプレイできます。
+
 開始時の値はheaderの `config.players[].agentModel`、各手の使用値はdecisionの `execution.model` に保存します。`execution.provenance.model` で `user-configured`（対局設定）・`agent-reported`（判断時の申告）・`unknown` を区別します。サーバーの自動検証済み情報ではありません。リプレイは表示中の手までの記録を参照し、保存対局一覧は記録されたモデル名を表示します。以前のログの空欄は推測で補いません。旧形式の推論レベルはログに保持されますが、表示・編集の対象にはしません。
 
 応答の `acceptedDecisionId` が確定した局面、`decisionId` が次のCodex局面（相手の番・終了ならnull）です。まだ自分の番なら最新の `observe` を取り直して次の1手へ進み、7固定したら `wait` で待ちます。通信結果が不明な場合は現在の状態を取得して確定の有無を確認します。古い `decisionId` の再送は拒否し、次のミノを誤って固定しません。

@@ -96,10 +96,20 @@ test('metadata HTTP lifecycle preserves logs, compatibility and public informati
   assert.equal((await request('/api/runs/missing/metadata','PATCH',{title:'missing'})).status,404);
   assert.equal((await request('/api/runs?trash=invalid')).status,400);
   for(const type of ['codex','agy','opencode','claude']) {
-    const configured=await request('/api/matches','POST',{players:[{type,agentModel:'Custom session model High',reasoningEffort:'high'},{type:'human'}],maxLocks:1});
+    for(const reasoningEffort of ['high',null,123]) {
+      const rejected=await request('/api/matches','POST',{players:[{type,reasoningEffort},{type:'human'}],maxLocks:1});
+      assert.equal(rejected.status,400);assert.match(rejected.value.error,/reasoningEffort.*agentModel.*に含めてください/);
+    }
+    const configured=await request('/api/matches','POST',{players:[{type,agentModel:'Custom session model High'},{type:'human'}],maxLocks:1});
     assert.equal(configured.status,201);
     assert.equal(configured.value.header.config.players[0].agentModel,'Custom session model High');
     assert(!Object.hasOwn(configured.value.header.config.players[0],'reasoningEffort'));
+    assert.equal(configured.value.header.config.players[0].input,`${type}-session-v2`);
+    const root=(await request(`/api/agent/matches/${configured.value.id}`)).value;
+    assert.equal(root.protocol,`stackingbench.${type}-session.v2`);
+    const rejected=await request(`/api/agent/matches/${configured.value.id}/choose`,'POST',{decisionId:root.decisionId,moveId:root.observation.legalMoves[0].id,reasoningEffort:'high'});
+    assert.equal(rejected.status,400);assert.match(rejected.value.error,/reasoningEffort.*agentModel.*に含めてください/);
+    assert.equal((await request(`/api/agent/matches/${configured.value.id}/status`)).value.locks,0);
     await request(`/api/matches/${configured.value.id}/stop`,'POST',{});
   }
 });
