@@ -19,17 +19,18 @@ export const RUN_FORMAT=Number.isInteger(Number(process.env.STACKINGBENCH_RUN_FO
 export const hashState=state=>createHash('sha256').update(JSON.stringify(state)).digest('hex');
 export async function* streamRun(id) {
   if(!/^[a-zA-Z0-9_-]+$/.test(id)) throw Error('Invalid run ID');
-  let tail='';
+  let parts=[];
   for await(const chunk of createReadStream(join(RUNS,`${id}.jsonl`),{encoding:'utf8'})) {
-    tail+=chunk;
     let start=0,end;
-    while((end=tail.indexOf('\n',start))!==-1) {
-      const line=tail.slice(start,end);start=end+1;
+    while((end=chunk.indexOf('\n',start))!==-1) {
+      const line=parts.length?parts.join('')+chunk.slice(start,end):chunk.slice(start,end);
+      parts=[];start=end+1;
       if(line.trim())yield JSON.parse(line);
     }
-    tail=tail.slice(start);
+    if(start<chunk.length)parts.push(chunk.slice(start));
   }
   // An interrupted append may leave an incomplete final record.
+  const tail=parts.join('');
   if(tail.trim()) {let record;try {record=JSON.parse(tail);} catch {return;}yield record;}
 }
 export function compactRecord(record) {const {trace,...rest}=record;return rest;}
@@ -86,7 +87,12 @@ export function summarize(state,records) {
 }
 export class Match {
   static async savedSnapshot(id) {
-    const records=await readRun(id,{compact:true}),header=records[0],decisions=records.filter(r=>r.type==='decision'),end=records.findLast(r=>r.type==='end');
+    let header,end;const decisions=[];
+    for await(const record of streamRun(id)) {
+      if(record.type==='header')header=record;
+      else if(record.type==='decision')decisions.push(compactRecord(record));
+      else if(record.type==='end')end=record;
+    }
     const match=Object.assign(new Match(),{id,header,config:header.config,records:decisions,state:end?.state??decisions.at(-1)?.state??header.initialState,busy:false,running:false,stopRequested:end?.status==='aborted'});
     return {...match.snapshot(),archived:true};
   }

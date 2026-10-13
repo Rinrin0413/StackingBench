@@ -23,6 +23,7 @@ async function replayJson(res,id) {
   // Stream compact viewer records; full transcripts remain in the JSONL file.
   let first=true;
   for await(const record of streamRun(id)) {
+    if(record.type==='agent-event')continue;
     if(res.destroyed)throw Error('Replay client disconnected');
     if(first)res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
     if(!res.write((first?'[':',')+JSON.stringify(compactRecord(record))))await new Promise((resolve,reject)=>{

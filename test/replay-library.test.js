@@ -65,6 +65,7 @@ test('metadata HTTP lifecycle preserves logs, compatibility and public informati
   const completedAgent=(await request(`/api/agent/matches/${id}/status`)).value;
   assert.equal(completedAgent.status,'aborted');assert.equal(completedAgent.ready,false);
   assert(!(await request('/api/agent/matches')).value.some(m=>m.id===id));
+  assert(!(await request(`/api/runs/${id}`)).value.some(r=>r.type==='agent-event'));
   const forks=await Promise.all(Array.from({length:2},()=>request('/api/matches','POST',{parent:{id,index:0},players:[{type:'human'},{type:'human'}]})));
   assert.deepEqual(forks.map(r=>r.status).sort(),[201,409]);
   const fork=forks.find(r=>r.status===201).value;
