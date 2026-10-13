@@ -34,6 +34,8 @@ pnpm run agent -- wait RUN_ID --after PREVIOUS_DECISION_ID --timeout-ms 50000
 
 1手ずつ判断します。必要なら以下のようにJSONを標準入力で送り、試し読みします。共有の一時ファイルを使わないため、他のセッションとファイルが競合しません。
 
+以下のように JSON 全体をシングルクォートで囲む場合、`reason`・`memo` などの文字列中の `'` は JSON 側で `\u0027` と書いてください（例: `it\u0027s safe`）。
+
 ```bash
 echo '{"decisionId":"観測のdecisionId","node":"root","moveId":"m0012","requestId":"preview-1"}' | pnpm run agent -- preview RUN_ID --file -
 ```

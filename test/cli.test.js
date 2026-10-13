@@ -7,7 +7,6 @@ import {once} from 'node:events';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {createHash} from 'node:crypto';
 import {createGame} from '../src/engine.js';
 
 const execute=promisify(execFile);
@@ -60,9 +59,10 @@ test('probe CLI preserves the positional model after a pnpm separator',async t=>
 });
 
 test('replay CLI accepts a run ID with and without a pnpm separator',async t=>{
+  const {hashState}=await import('../src/match.js');
   const dir=await mkdtemp(join(tmpdir(),'stackingbench-cli-replay-'));
   t.after(()=>rm(dir,{recursive:true,force:true}));
-  const initialState=createGame(),initialHash=createHash('sha256').update(JSON.stringify(initialState)).digest('hex');
+  const initialState=createGame(),initialHash=hashState(initialState);
   await writeFile(join(dir,'fixture.jsonl'),JSON.stringify({type:'header',initialState,initialHash})+'\n');
   for(const prefix of [[],['--']])assert.match(await pnpm('replay',[...prefix,'fixture'],{STACKINGBENCH_RUNS:dir}),/Verified 0 decisions: fixture/);
 });

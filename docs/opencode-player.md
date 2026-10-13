@@ -27,6 +27,8 @@ node scripts/agent.js wait RUN_ID --after PREVIOUS_DECISION_ID --timeout-ms 5000
 
 試し読み用JSONを標準入力で送る例（共有の一時ファイルを使わず、他のセッションとのファイル競合を避けます）:
 
+以下のように JSON 全体をシングルクォートで囲む場合、`reason`・`memo` などの文字列中の `'` は JSON 側で `\u0027` と書いてください（例: `it\u0027s safe`）。
+
 ```bash
 echo '{"decisionId":"現在のdecisionId","node":"root","moveId":"m0012","requestId":"preview-1"}' | node scripts/agent.js preview RUN_ID --file -
 ```
