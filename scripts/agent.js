@@ -3,6 +3,7 @@ import {readFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 
+if(process.argv[2]==='--')process.argv.splice(2,1);
 const [command,id,...args]=process.argv.slice(2);
 const usage='Usage: pnpm run agent -- list | observe ID | wait ID [--after DECISION_ID] [--timeout-ms 50000] | preview ID --file JSON_FILE | choose ID --file JSON_FILE (use --file - for stdin)';
 try {
